@@ -1,0 +1,4 @@
+http.bind.port: 8080
+#http.bind.ip: 0.0.0.0
+http.bind.ip: 127.0.0.1
+

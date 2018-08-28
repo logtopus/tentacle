@@ -1,0 +1,17 @@
+[package]
+name = "tentacle"
+version = "0.1.0"
+authors = ["niveau0 <plingplong@t-online.de>", "kodemaniak <carsten@kodemaniak.de>"]
+publish = false
+
+[dependencies]
+actix = "0.7" # actor framework
+actix-web = "0.7" # web serving
+bytes = "0.4"
+clap = "2.32" # parse command line options
+config = "0.9" # parse config file
+log = "0.4" # logging facade
+env_logger = "0.5" # log implementation
+futures = "0.1"
+http = "0.1"
+tokio = "0.1"
