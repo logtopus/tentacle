@@ -3,7 +3,6 @@ extern crate actix_web;
 extern crate bytes;
 extern crate futures;
 extern crate http;
-extern crate tokio;
 
 use actix_web::HttpMessage;
 use futures::Future;
@@ -13,8 +12,6 @@ mod support;
 #[test]
 fn itest_health_api() {
     support::run_test(setup, || {
-        let _sys = support::TestActorSystem::new(); // required for running tokio event loop
-
         fn request() -> impl futures::Future<Item=(), Error=support::TestError> {
             actix_web::client::ClientRequest::get("http://localhost:8080/health")
                 .header("User-Agent", "Actix-web")

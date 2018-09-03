@@ -1,13 +1,10 @@
 // Test support methods
 extern crate actix;
 extern crate futures;
-extern crate tokio;
 
 use std::panic;
-use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
-use tokio::runtime::current_thread::Runtime;
 
 const RETRY_SLEEPTIME: Duration = Duration::from_millis(1000);
 
@@ -17,38 +14,15 @@ pub enum TestError {
     Fail,
 }
 
-pub struct TestActorSystem;
-
-impl TestActorSystem {
-    pub fn new() -> TestActorSystem {
-        let (tx, rx) = mpsc::channel(); // need to transfer spawned system back to this thread
-        thread::spawn(move || {
-            let sys = actix::System::new("testsystem");
-            tx.send(actix::System::current()).unwrap();
-            sys.run();
-        });
-        let sys = rx.recv().unwrap();
-        actix::System::set_current(sys);
-
-        TestActorSystem {}
-    }
-}
-
-impl Drop for TestActorSystem {
-    fn drop(&mut self) {
-        println!("Dropping integration test actor system");
-        actix::System::current().stop();
-    }
-}
-
 pub fn run_with_retries<R, F>(request: &R, retries: i32, failmsg: &'static str) -> ()
     where
         F: futures::Future<Item=(), Error=TestError>,
         R: Fn() -> F {
     let mut retries = retries;
-    let mut runtime = Runtime::new().unwrap();
+
+    let mut sys = actix::System::new("testsystem");
     while retries >= 0 { // exec at least once
-        match runtime.block_on(request()) {
+        match sys.block_on(request()) {
             Ok(_) => break,
             Err(TestError::Fail) => assert!(false, failmsg),
             Err(TestError::Retry) => {
