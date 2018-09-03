@@ -3,6 +3,8 @@ name = "tentacle"
 version = "0.1.0"
 authors = ["niveau0 <plingplong@t-online.de>", "kodemaniak <carsten@kodemaniak.de>"]
 publish = false
+description = "Tentacle is the process that provides data for the central logtopus service running somewhere else."
+license = "Apache-2.0"
 
 [dependencies]
 actix = "0.7" # actor framework
@@ -15,3 +17,9 @@ env_logger = "0.5" # log implementation
 futures = "0.1"
 http = "0.1"
 tokio = "0.1"
+
+[package.metadata.rpm.cargo]
+buildflags = ["--release"]
+
+[package.metadata.rpm.targets]
+tentacle = { path = "/usr/bin/tentacle" }
