@@ -14,7 +14,7 @@ fn itest_health_api() {
     support::run_test(setup, || {
         fn request() -> impl futures::Future<Item=(), Error=support::TestError> {
 
-            let health_api_request = actix_web::client::ClientRequest::get("http://localhost:8080/health")
+            let health_api_request = actix_web::client::ClientRequest::get("http://localhost:8080/api/v1/health")
                 .header("User-Agent", "Actix-web")
                 .timeout(std::time::Duration::from_millis(1000))
                 .finish().unwrap();
@@ -40,13 +40,13 @@ fn itest_health_api() {
                                     support::TestError::Fail
                                 })
                                 .map(|s| {
-                                    assert!(s == "OK");
+                                    assert!(s == "");
                                     Ok(())
                                 })
+                                .and_then(|r| r) // flatten result
                         )
+                        .and_then(|r| r) // flatten result
                 )
-                .and_then(|r| r) // flatten result
-                .and_then(|r| r) // flatten result
                 .and_then(|r| r) // flatten result
         }
 

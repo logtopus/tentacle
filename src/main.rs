@@ -4,8 +4,12 @@ extern crate bytes;
 extern crate clap;
 extern crate config;
 extern crate env_logger;
+extern crate futures;
+extern crate http;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate serde_derive;
 
 use clap::{App, Arg, ArgMatches};
 //use std::collections::HashMap;
