@@ -88,15 +88,3 @@ fn parse_cli() -> clap::ArgMatches<'static> {
             .help("Sets the level of verbosity via loglevel (error, warn, debug and trace)"))
         .get_matches()
 }
-
-#[cfg(test)]
-mod tests {
-    use cfg;
-
-    #[test]
-    fn test_read_config() {
-        let settings = cfg::read_config(&Some("tests/testconf.yml")).unwrap();
-        assert_eq!(12345, settings.get_int("http.bind.port").unwrap());
-        assert_eq!("127.0.0.1", settings.get_str("http.bind.ip").unwrap());
-    }
-}
