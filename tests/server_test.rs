@@ -13,30 +13,42 @@ mod support;
 fn itest_health_api() {
     support::run_test(setup, || {
         fn request() -> impl futures::Future<Item=(), Error=support::TestError> {
-            actix_web::client::ClientRequest::get("http://localhost:8080/health")
+
+            let health_api_request = actix_web::client::ClientRequest::get("http://localhost:8080/health")
                 .header("User-Agent", "Actix-web")
                 .timeout(std::time::Duration::from_millis(1000))
-                .finish()
-                .unwrap()
-                .send()
-                .map_err(|_| support::TestError::Retry)
-                .and_then(|response| {
-                    assert!(response.status() == http::StatusCode::OK);
-                    response.body()
-                        .map(|bytes| {
-                            actix::System::current().stop();
-                            std::str::from_utf8(&bytes)
-                                .map_err(|_| support::TestError::Fail)
-                                .map(|s| match s {
-                                    "OK" => Ok(()),
-                                    _ => Err(support::TestError::Fail)
-                                })
-                        })
-                        .map_err(|_| support::TestError::Fail)
+                .finish().unwrap();
+
+            health_api_request.send()
+                .map_err(|_| {
+                    support::TestError::Retry
                 })
+                .map(|r| {
+                    assert!(r.status() == http::StatusCode::OK, format!("Query failed with error code {}", r.status()));
+                    r.body()
+                })
+                .map(|body|
+                    body
+                        .map_err(|e| {
+                            assert!(false, e);
+                            support::TestError::Fail
+                        })
+                        .map(|bytes|
+                            std::str::from_utf8(&bytes)
+                                .map_err(|e| {
+                                    assert!(false, e);
+                                    support::TestError::Fail
+                                })
+                                .map(|s| {
+                                    assert!(s == "OK");
+                                    Ok(())
+                                })
+                        )
+                )
                 .and_then(|r| r) // flatten result
                 .and_then(|r| r) // flatten result
-        };
+                .and_then(|r| r) // flatten result
+        }
 
         support::run_with_retries(&request, 10, "Failed to query health api")
     }, teardown)

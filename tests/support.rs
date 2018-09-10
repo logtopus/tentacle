@@ -19,8 +19,8 @@ pub fn run_with_retries<R, F>(request: &R, retries: i32, failmsg: &'static str) 
         F: futures::Future<Item=(), Error=TestError>,
         R: Fn() -> F {
     let mut retries = retries;
-
     let mut sys = actix::System::new("testsystem");
+
     while retries >= 0 { // exec at least once
         match sys.block_on(request()) {
             Ok(_) => break,
@@ -36,6 +36,8 @@ pub fn run_with_retries<R, F>(request: &R, retries: i32, failmsg: &'static str) 
             }
         }
     }
+
+    actix::System::current().stop();
 }
 
 pub fn run_test<S, T, U, V>(setup: S, test: T, teardown: U) -> ()
