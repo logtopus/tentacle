@@ -1,8 +1,13 @@
+use failure::Fail;
 use server;
-use std::cell::RefCell;
+use std::sync::Arc;
+use std::sync::RwLock;
 
+#[derive(Fail, Debug)]
 pub enum ApiError {
+    #[fail(display = "Source already exists")]
     SourceAlreadyAdded,
+    #[fail(display = "Unknown source type")]
     UnknownSourceType,
 }
 
@@ -29,25 +34,40 @@ pub fn map_dto_to_source(dto: server::SourceDTO) -> Result<Source, ApiError> {
     }.map(|t| Source { srctype: t, path: dto.path })
 }
 
-#[derive(Debug, PartialEq, PartialOrd)]
 pub struct ServerState {
-    sources: RefCell<Vec<Source>>
+    sources: Arc<RwLock<Vec<Source>>>
+    // blocking_pool: Arc<ThreadPool>
+}
+
+impl Clone for ServerState {
+    fn clone(&self) -> Self {
+        ServerState {
+            sources: self.sources.clone()
+            // blocking_pool: self.blocking_pool.clone()
+        }
+    }
 }
 
 impl ServerState {
     pub fn new() -> ServerState {
         ServerState {
-            sources: RefCell::new(vec![])
+            sources: Arc::new(RwLock::new(vec![]))
+            // blocking_pool: Arc::new(ThreadPool::new())
         }
     }
 
-    pub fn add_source(&self, source: Source) -> Result<(), ApiError> {
-        if self.sources.borrow().contains(&source) {
+    pub fn add_source(&mut self, source: Source) -> Result<(), ApiError> {
+        let mut locked_vec = self.sources.write().unwrap();
+
+        if locked_vec.contains(&source) {
             Err(ApiError::SourceAlreadyAdded)
         } else {
-            self.sources.borrow_mut().push(source);
+            locked_vec.push(source);
             Ok(())
         }
     }
-}
 
+    pub fn get_sources(&self) -> Arc<RwLock<Vec<Source>>> {
+        self.sources.clone()
+    }
+}

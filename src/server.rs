@@ -1,30 +1,48 @@
 use actix;
 use actix::Actor;
-use actix::AsyncContext;
+//use actix::AsyncContext;
 use actix_web;
-use actix_web::AsyncResponder;
-use actix_web::Error;
-use actix_web::error::ErrorInternalServerError;
+//use actix_web::AsyncResponder;
 use actix_web::Binary;
 use actix_web::Body;
+use actix_web::error::ResponseError;
 use actix_web::http;
 use actix_web::HttpMessage;
 use actix_web::HttpRequest;
 use actix_web::HttpResponse;
+//use actix_web::FutureResponse;
 use app;
 use app::ServerState;
 use bytes::Bytes;
 use config;
 use futures;
 use futures::Future;
-use std;
-use std::sync::Arc;
-use tokio;
-use tokio::fs::File;
 use futures::Stream;
-use futures::Sink;
+use std;
+use streamer;
+//use std::ops::Deref;
+use tokio;
+use tokio_threadpool;
+//use futures::Sink;
 
 const WELCOME_MSG: &'static str = "This is a logtopus tentacle";
+
+impl ResponseError for app::ApiError {
+    fn error_response(&self) -> HttpResponse {
+        match *self {
+            app::ApiError::SourceAlreadyAdded => {
+                HttpResponse::BadRequest()
+                    .header(http::header::CONTENT_TYPE, "application/json")
+                    .json(ErrorResponse { message: app::ApiError::SourceAlreadyAdded.to_string() })
+            }
+            app::ApiError::UnknownSourceType => {
+                HttpResponse::BadRequest()
+                    .header(http::header::CONTENT_TYPE, "application/json")
+                    .json(ErrorResponse { message: app::ApiError::UnknownSourceType.to_string() })
+            }
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SourceDTO {
@@ -34,34 +52,33 @@ pub struct SourceDTO {
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ErrorResponse {
-    message: &'static str
+    message: String
 }
 
 pub fn start_server(settings: &config::Config) {
     let port = settings.get_int("http.bind.port").unwrap();
     let ip = settings.get_str("http.bind.ip").unwrap();
     let addr: std::net::SocketAddr = format!("{}:{}", ip, port).parse().unwrap();
+    let server_state = ServerState::new();
 
-    actix_web::server::new(|| {
-        let server_state = Arc::new(ServerState::new());
-
+    actix_web::server::new(move || {
         vec![
-            actix_web::App::with_state(server_state)
+            actix_web::App::with_state(server_state.clone())
                 .middleware(actix_web::middleware::Logger::default())
                 .prefix("/api/v1")
                 .resource("/health", |r| {
-                    r.get().f(health);
+                    r.get().with(health);
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .resource("/sources", |r| {
-                    r.post().f(add_source);
-                    r.get().f(get_sources);
+                    r.post().with(add_source);
+//                    r.get().f(get_sources);
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
-                .resource("/sources/{id}/content", |r| {
-                    r.get().f(get_source_content);
-                    r.head().f(|_| HttpResponse::MethodNotAllowed());
-                })
+               .resource("/sources/{id}/content", |r| {
+                   r.get().with(get_source_content);
+                   r.head().f(|_| HttpResponse::MethodNotAllowed());
+               })
                 .boxed(),
             actix_web::App::new()
                 .middleware(actix_web::middleware::Logger::default())
@@ -79,96 +96,72 @@ fn index(_req: &HttpRequest) -> HttpResponse {
     HttpResponse::Ok().body(Body::Binary(Binary::Slice(WELCOME_MSG.as_ref())))
 }
 
-fn health(_req: &HttpRequest<Arc<ServerState>>) -> HttpResponse {
+fn health(_state: actix_web::State<ServerState>) -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
-fn add_source(req: &HttpRequest<Arc<ServerState>>) -> Box<Future<Item=HttpResponse, Error=actix_web::Error>> {
-    let path = req.uri().path().to_owned();
-    let state: Arc<ServerState> = Arc::clone(req.state());
+fn add_source((json, state): (actix_web::Json<SourceDTO>, actix_web::State<ServerState>)) -> HttpResponse {
+    let response =
+        match app::map_dto_to_source(json.into_inner()) {
+            Ok(src) => {
+                let mut state: ServerState = state.clone();
 
-    let response = req.json().from_err()
-        .and_then(move |dto: SourceDTO|
-            match app::map_dto_to_source(dto) {
-                Ok(src) =>
-                    match state.add_source(src) {
-                        Ok(_) => Ok(HttpResponse::Created()
-                            .header(http::header::CONTENT_LOCATION, path + "/x")
-                            .finish()),
-                        Err(app::ApiError::SourceAlreadyAdded) => Ok(HttpResponse::BadRequest()
-                            .header(http::header::CONTENT_TYPE, "application/json")
-                            .json(ErrorResponse { message: "Source already exists" })),
-                        Err(_) => Ok(HttpResponse::InternalServerError()
-                            .header(http::header::CONTENT_TYPE, "application/json")
-                            .json(ErrorResponse { message: "Unexpected Error" })),
-                    },
-                Err(app::ApiError::UnknownSourceType) => Ok(HttpResponse::BadRequest()
-                    .header(http::header::CONTENT_TYPE, "application/json")
-                    .json(ErrorResponse { message: "Unknown source type" })),
-                Err(_) => Ok(HttpResponse::InternalServerError()
-                    .header(http::header::CONTENT_TYPE, "application/json")
-                    .json(ErrorResponse { message: "Unexpected Error" })),
+                match state.add_source(src) {
+                    Ok(_id) =>
+                        HttpResponse::Created()
+                            .header(http::header::CONTENT_LOCATION, "/x")
+                            .finish(),
+                    Err(e) => e.error_response()
+                }
             }
-        );
+            Err(e) => e.error_response()
+        };
 
-    response.responder()
+    response
 }
 
 
-fn get_sources(_req: &HttpRequest<Arc<ServerState>>) -> HttpResponse {
-    HttpResponse::Ok()
-//        .chunked()
-        .body(Body::Streaming(Box::new(futures::stream::once(Ok(Bytes::from_static(b"data"))))))
-}
+//fn get_sources(req: &HttpRequest<ServerState>) -> HttpResponse {
+//    let state: Arc<ServerState> = Arc::clone(req.state());
+//
+//    HttpResponse::Ok()
+////        .chunked()
+//        .body(Body::Streaming(Box::new(futures::stream::once(Ok(Bytes::from_static(b"data"))))))
+//}
 
-struct Streamer {
-    tx: futures::sync::mpsc::Sender<String>,
-    file: tokio::fs::File
-}
 
-impl Streamer {
-    pub fn new(tx: futures::sync::mpsc::Sender<String>, file: tokio::fs::File) -> Self {
-        Streamer { 
-            tx: tx, 
-            file: file
-        }
-    }
-}
-impl actix::Actor for Streamer {
-    type Context = actix::Context<Self>;
-
-    fn started(&mut self, ctx: &mut Self::Context) {
-        // let linereader = tokio::codec::FramedRead::new(self.file, tokio::codec::LinesCodec::new());
-        // ctx.add_stream(linereader);
-    }
-}
-
-impl actix::StreamHandler<String, std::io::Error> for Streamer {
-    fn handle(&mut self, line: String, _ctx: &mut Self::Context) {
-        match self.tx.start_send(line)  {
-            Ok(_) => (),
-            Err(e) => error!("Stream failure: {}", e)
-        }
-    }
-}
-
-fn get_source_content(_req: &HttpRequest<Arc<ServerState>>) -> Box<Future<Item = HttpResponse, Error = Error>> {
-    let response =  File::open("/var/log/alternatives.log")
-        .and_then(|f| {
-            let (tx, rx_body) = futures::sync::mpsc::channel(1024*1024);
-            Streamer::new(tx, f).start();
-            Ok(HttpResponse::Ok().streaming(rx_body.map_err(|_| ErrorInternalServerError("Failed stream")).map(|s| Bytes::from(s))))
-    });
-
-    response.from_err().responder()
+fn get_source_content(state: actix_web::State<ServerState>) -> HttpResponse 
+    // actix_web::FutureResponse<HttpResponse> 
+    {
+    // let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
+    // let path = std::path::Path::new("/var/log/alternatives.log");
+    // let streamer = streamer::Streamer::new(tx, path).start();
+    
+    // streamer.send(streamer::Message::Start)
+    //     .map_err(error::Error::from)
+    //     .and_then(|res| {
+    //         match res {
+    //             Ok(result) => 
+    //                 HttpResponse::Ok().streaming(rx_body
+    //                     .map_err(|_| actix_web::error::PayloadError::Incomplete)
+    //                     .map(|s| Bytes::from(s))),
+    //             Err(err) => Err(
+    //                 error!("Failed to stream file content: BlockingError");
+    //                 HttpResponse::BadRequest()
+    //                     .header(http::header::CONTENT_TYPE, "application/json")
+    //                     .json(ErrorResponse { message: e.to_string() })
+    //                     error::ErrorInternalServerError("Something went wrong! :("))
+    //         })
+    HttpResponse::Ok().finish()
 }
 
 #[cfg(test)]
 mod tests {
     use actix_web::{http, test};
     use actix_web::Body;
+    use actix_web::FromRequest;
+    use actix_web::State;
     use std;
-    use std::sync::Arc;
 
     #[test]
     fn test_index_handler() {
@@ -187,18 +180,18 @@ mod tests {
 
     #[test]
     fn test_health_handler() {
-        let resp = test::TestRequest::with_state(Arc::new(super::ServerState::new())).header("content-type", "text/plain")
-            .run(&super::health)
-            .unwrap();
+        let state = super::ServerState::new();
+        let req = test::TestRequest::with_state(state).finish();
+        let resp = super::health(State::extract(&req));
         assert_eq!(resp.status(), http::StatusCode::OK);
     }
 
     #[test]
-    fn test_list_log_handler() {
-        let resp = test::TestRequest::with_state(Arc::new(super::ServerState::new())).header("content-type", "text/plain")
-            .run(&super::get_source_content)
-            .unwrap();
-        assert_eq!(resp.status(), http::StatusCode::OK);
+    fn test_get_source_content_handler() {
+        let state = super::ServerState::new();
+        let req = test::TestRequest::with_state(state).header("content-type", "text/plain").finish();
+        let resp = super::get_source_content(State::extract(&req));
+        assert_eq!(resp.status(), http::StatusCode::OK, "Response was {:?}", resp.body());
 
         match resp.body() {
             Body::Streaming(_) => (),

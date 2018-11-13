@@ -5,18 +5,21 @@ extern crate clap;
 extern crate config;
 extern crate env_logger;
 extern crate futures;
+extern crate failure;
 extern crate http;
 #[macro_use]
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
 extern crate tokio;
+extern crate tokio_threadpool;
 
 use clap::{App, Arg, ArgMatches};
 //use std::collections::HashMap;
 
 pub mod cfg;
 mod server;
+mod streamer;
 mod app;
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
@@ -91,6 +94,6 @@ fn parse_cli() -> clap::ArgMatches<'static> {
         .arg(Arg::with_name("v")
             .short("v")
             .multiple(true)
-            .help("Sets the level of verbosity via loglevel (error, warn, debug and trace)"))
+            .help("Level of verbosity (error is default) if used multiple times: warn(v), info(vv), debug(vvv) and trace(vvvv)"))
         .get_matches()
 }
