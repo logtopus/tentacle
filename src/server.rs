@@ -20,10 +20,6 @@ use futures::Future;
 use futures::Stream;
 use std;
 use streamer;
-//use std::ops::Deref;
-use tokio;
-use tokio_threadpool;
-//use futures::Sink;
 
 const WELCOME_MSG: &'static str = "This is a logtopus tentacle";
 
@@ -75,10 +71,10 @@ pub fn start_server(settings: &config::Config) {
 //                    r.get().f(get_sources);
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
-               .resource("/sources/{id}/content", |r| {
-                   r.get().with(get_source_content);
-                   r.head().f(|_| HttpResponse::MethodNotAllowed());
-               })
+                .resource("/sources/{id}/content", |r| {
+                    r.get().with(get_source_content);
+                    r.head().f(|_| HttpResponse::MethodNotAllowed());
+                })
                 .boxed(),
             actix_web::App::new()
                 .middleware(actix_web::middleware::Logger::default())
@@ -130,18 +126,28 @@ fn add_source((json, state): (actix_web::Json<SourceDTO>, actix_web::State<Serve
 //}
 
 
-fn get_source_content(state: actix_web::State<ServerState>) -> HttpResponse 
-    // actix_web::FutureResponse<HttpResponse> 
-    {
-    // let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
-    // let path = std::path::Path::new("/var/log/alternatives.log");
-    // let streamer = streamer::Streamer::new(tx, path).start();
-    
-    // streamer.send(streamer::Message::Start)
+fn get_source_content(state: actix_web::State<ServerState>) -> HttpResponse
+// actix_web::FutureResponse<HttpResponse>
+{
+    let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
+    let streamer = streamer::Streamer::new(state.clone(), tx).start();
+    let request = streamer.send(streamer::Message::StreamFilePath("bla".to_string()));
+
+    actix::spawn(request
+        .map_err(|e| println!("Streaming Actor has probably died: {}", e)));
+//            .map(|res| {
+//                match res {
+//                    Ok(result) => println!("Got result: {}", result),
+//                    Err(err) => println!("Got error: {}", err),
+//                }
+//            })
+//            .map_err(|e| {
+//                println!("Actor is probably died: {}", e);
+//            }));
     //     .map_err(error::Error::from)
     //     .and_then(|res| {
     //         match res {
-    //             Ok(result) => 
+    //             Ok(result) =>
     //                 HttpResponse::Ok().streaming(rx_body
     //                     .map_err(|_| actix_web::error::PayloadError::Incomplete)
     //                     .map(|s| Bytes::from(s))),
@@ -152,7 +158,10 @@ fn get_source_content(state: actix_web::State<ServerState>) -> HttpResponse
     //                     .json(ErrorResponse { message: e.to_string() })
     //                     error::ErrorInternalServerError("Something went wrong! :("))
     //         })
-    HttpResponse::Ok().finish()
+    HttpResponse::Ok().streaming(rx_body
+        .map_err(|_| actix_web::error::PayloadError::Incomplete)
+        .map(|s| Bytes::from(s)))
+//        .responder()
 }
 
 #[cfg(test)]

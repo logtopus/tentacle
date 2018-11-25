@@ -2,6 +2,10 @@ use failure::Fail;
 use server;
 use std::sync::Arc;
 use std::sync::RwLock;
+use tokio::runtime::Runtime;
+use futures::Future;
+use std::sync::Mutex;
+use std::io;
 
 #[derive(Fail, Debug)]
 pub enum ApiError {
@@ -35,15 +39,15 @@ pub fn map_dto_to_source(dto: server::SourceDTO) -> Result<Source, ApiError> {
 }
 
 pub struct ServerState {
-    sources: Arc<RwLock<Vec<Source>>>
-    // blocking_pool: Arc<ThreadPool>
+    sources: Arc<RwLock<Vec<Source>>>,
+    blk_rt: Arc<Mutex<Runtime>>,
 }
 
 impl Clone for ServerState {
     fn clone(&self) -> Self {
         ServerState {
-            sources: self.sources.clone()
-            // blocking_pool: self.blocking_pool.clone()
+            sources: self.sources.clone(),
+            blk_rt: self.blk_rt.clone(),
         }
     }
 }
@@ -51,8 +55,19 @@ impl Clone for ServerState {
 impl ServerState {
     pub fn new() -> ServerState {
         ServerState {
-            sources: Arc::new(RwLock::new(vec![]))
-            // blocking_pool: Arc::new(ThreadPool::new())
+            sources: Arc::new(RwLock::new(vec![])),
+            blk_rt: Arc::new(Mutex::new(Runtime::new().unwrap())),
+        }
+    }
+
+    pub fn spawn_blocking(&self, f: impl Future<Item=(), Error=()> + Send + 'static) -> Result<(), io::Error> {
+        let mutex = self.blk_rt.lock();
+        match mutex {
+            Ok(mut rt) => {
+                (*rt).spawn(f);
+                Ok(())
+            },
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, "oh no!"))
         }
     }
 
