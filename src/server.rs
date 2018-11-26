@@ -1,16 +1,12 @@
 use actix;
 use actix::Actor;
-//use actix::AsyncContext;
 use actix_web;
-//use actix_web::AsyncResponder;
 use actix_web::Binary;
 use actix_web::Body;
 use actix_web::error::ResponseError;
 use actix_web::http;
-use actix_web::HttpMessage;
 use actix_web::HttpRequest;
 use actix_web::HttpResponse;
-//use actix_web::FutureResponse;
 use app;
 use app::ServerState;
 use bytes::Bytes;
@@ -126,15 +122,17 @@ fn add_source((json, state): (actix_web::Json<SourceDTO>, actix_web::State<Serve
 //}
 
 
-fn get_source_content(state: actix_web::State<ServerState>) -> HttpResponse
-// actix_web::FutureResponse<HttpResponse>
+fn get_source_content(state: actix_web::State<ServerState>) -> HttpResponse //actix_web::FutureResponse<HttpResponse>
 {
     let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
     let streamer = streamer::Streamer::new(state.clone(), tx).start();
     let request = streamer.send(streamer::Message::StreamFilePath("bla".to_string()));
 
-    actix::spawn(request
-        .map_err(|e| println!("Streaming Actor has probably died: {}", e)));
+    actix::spawn(request.map_err(|e| println!("Streaming Actor has probably died: {}", e)));
+
+    HttpResponse::Ok().streaming(rx_body
+        .map_err(|_| actix_web::error::PayloadError::Incomplete)
+        .map(|s| Bytes::from(s)))
 //            .map(|res| {
 //                match res {
 //                    Ok(result) => println!("Got result: {}", result),
@@ -158,9 +156,8 @@ fn get_source_content(state: actix_web::State<ServerState>) -> HttpResponse
     //                     .json(ErrorResponse { message: e.to_string() })
     //                     error::ErrorInternalServerError("Something went wrong! :("))
     //         })
-    HttpResponse::Ok().streaming(rx_body
-        .map_err(|_| actix_web::error::PayloadError::Incomplete)
-        .map(|s| Bytes::from(s)))
+
+
 //        .responder()
 }
 

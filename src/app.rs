@@ -67,7 +67,7 @@ impl ServerState {
                 (*rt).spawn(f);
                 Ok(())
             },
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, "oh no!"))
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.to_string()))
         }
     }
 
