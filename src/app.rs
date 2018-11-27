@@ -11,12 +11,12 @@ use std::io;
 pub enum ApiError {
     #[fail(display = "Source already exists")]
     SourceAlreadyAdded,
-    #[fail(display = "Unknown source type")]
-    UnknownSourceType,
+    #[fail(display = "Failed to store source")]
+    FailedToWriteSource,
 }
 
-#[derive(Debug, PartialEq, PartialOrd)]
-enum SourceType {
+#[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd, Clone)]
+pub enum SourceType {
     File,
     Url,
     Journal, // see https://docs.rs/systemd/0.0.8/systemd/journal/index.html
@@ -28,14 +28,22 @@ pub struct Source {
     path: String,
 }
 
-// TODO: better use TryFrom trait if stable
-pub fn map_dto_to_source(dto: server::SourceDTO) -> Result<Source, ApiError> {
-    match dto.srctype.as_ref() {
-        "file" => Ok(SourceType::File),
-        "url" => Ok(SourceType::Url),
-        "journal" => Ok(SourceType::Journal),
-        _ => Err(ApiError::UnknownSourceType)
-    }.map(|t| Source { srctype: t, path: dto.path })
+impl Source {
+    pub fn into_dto(&self) -> server::SourceDTO {
+        server::SourceDTO {
+            srctype: self.srctype.clone(),
+            path: self.path.clone(),
+        }
+    }
+}
+
+impl From<server::SourceDTO> for Source {
+    fn from(dto: server::SourceDTO) -> Self {
+        Source {
+            srctype: dto.srctype,
+            path: dto.path,
+        }
+    }
 }
 
 pub struct ServerState {
@@ -66,13 +74,13 @@ impl ServerState {
             Ok(mut rt) => {
                 (*rt).spawn(f);
                 Ok(())
-            },
+            }
             Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.to_string()))
         }
     }
 
     pub fn add_source(&mut self, source: Source) -> Result<(), ApiError> {
-        let mut locked_vec = self.sources.write().unwrap();
+        let mut locked_vec = self.sources.write().map_err(|_| ApiError::FailedToWriteSource)?;
 
         if locked_vec.contains(&source) {
             Err(ApiError::SourceAlreadyAdded)

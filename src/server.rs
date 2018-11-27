@@ -26,10 +26,10 @@ impl ResponseError for app::ApiError {
                     .header(http::header::CONTENT_TYPE, "application/json")
                     .json(ErrorResponse { message: app::ApiError::SourceAlreadyAdded.to_string() })
             }
-            app::ApiError::UnknownSourceType => {
-                HttpResponse::BadRequest()
+            app::ApiError::FailedToWriteSource => {
+                HttpResponse::InternalServerError()
                     .header(http::header::CONTENT_TYPE, "application/json")
-                    .json(ErrorResponse { message: app::ApiError::UnknownSourceType.to_string() })
+                    .json(ErrorResponse { message: app::ApiError::FailedToWriteSource.to_string() })
             }
         }
     }
@@ -37,9 +37,10 @@ impl ResponseError for app::ApiError {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct SourceDTO {
-    pub srctype: String,
+    pub srctype: app::SourceType,
     pub path: String,
 }
+
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ErrorResponse {
@@ -63,7 +64,7 @@ pub fn start_server(settings: &config::Config) {
                 })
                 .resource("/sources", |r| {
                     r.post().with(add_source);
-//                    r.get().f(get_sources);
+                    r.get().with(get_sources);
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .resource("/sources/{id}/content", |r| {
@@ -92,33 +93,30 @@ fn health(_state: actix_web::State<ServerState>) -> HttpResponse {
 }
 
 fn add_source((json, state): (actix_web::Json<SourceDTO>, actix_web::State<ServerState>)) -> HttpResponse {
-    let response =
-        match app::map_dto_to_source(json.into_inner()) {
-            Ok(src) => {
-                let mut state: ServerState = state.clone();
-
-                match state.add_source(src) {
-                    Ok(_id) =>
-                        HttpResponse::Created()
-                            .header(http::header::CONTENT_LOCATION, "/x")
-                            .finish(),
-                    Err(e) => e.error_response()
-                }
-            }
-            Err(e) => e.error_response()
-        };
+    debug!("add_source");
+    let response = match state.clone().add_source(app::Source::from(json.into_inner())) {
+        Ok(_id) =>
+            HttpResponse::Created()
+                .header(http::header::CONTENT_LOCATION, "/x")
+                .finish(),
+        Err(e) => e.error_response()
+    };
 
     response
 }
 
 
-//fn get_sources(req: &HttpRequest<ServerState>) -> HttpResponse {
-//    let state: Arc<ServerState> = Arc::clone(req.state());
-//
-//    HttpResponse::Ok()
-////        .chunked()
-//        .body(Body::Streaming(Box::new(futures::stream::once(Ok(Bytes::from_static(b"data"))))))
-//}
+fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
+    let sources = state.get_sources();
+    let lock = sources.read();
+    match lock {
+        Ok(locked_vec) => {
+            let dto: Vec<SourceDTO> = locked_vec.iter().map(|src| src.into_dto()).collect();
+            HttpResponse::Ok().json(dto)
+        }
+        Err(_) => HttpResponse::InternalServerError().finish()
+    }
+}
 
 
 fn get_source_content(state: actix_web::State<ServerState>) -> HttpResponse //actix_web::FutureResponse<HttpResponse>
