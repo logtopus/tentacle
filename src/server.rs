@@ -16,8 +16,7 @@ use futures::Future;
 use futures::Stream;
 use std;
 use streamer;
-
-const WELCOME_MSG: &'static str = "This is a logtopus tentacle";
+use constants::*;
 
 impl ResponseError for app::ApiError {
     fn error_response(&self) -> HttpResponse {

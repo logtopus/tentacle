@@ -1,53 +1,18 @@
-extern crate actix;
-extern crate actix_web;
-extern crate bytes;
 extern crate clap;
 extern crate config;
 extern crate env_logger;
-extern crate futures;
-extern crate failure;
-extern crate http;
+extern crate tentacle;
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate serde_derive;
-extern crate tokio;
-extern crate tokio_threadpool;
 
 use clap::{App, Arg, ArgMatches};
-//use std::collections::HashMap;
-
-pub mod cfg;
-mod server;
-mod streamer;
-mod app;
-
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
-const AUTHORS: &'static str = env!("CARGO_PKG_AUTHORS");
 
 fn main() {
     let cli_matches = parse_cli();
 
     init_log(&cli_matches);
 
-    let maybe_filename = cli_matches.value_of("config");
-
-    let settings = match cfg::read_config(&maybe_filename) {
-        Ok(config) => config,
-        Err(msg) => {
-            println!("Error: {}", msg);
-           std::process::exit(1)
-        }
-    };
-
-    let sys = actix::System::new("root");
-
-    server::start_server(&settings);
-
-//    println!("\nConfiguration\n\n{:?} \n\n-----------",
-//             settings.try_into::<HashMap<String, config::Value>>().unwrap());
-
-    sys.run();
+    tentacle::run(cli_matches.value_of("config"));
 }
 
 fn init_log(matches: &ArgMatches) {
@@ -76,8 +41,8 @@ fn init_log(matches: &ArgMatches) {
 
 fn parse_cli() -> clap::ArgMatches<'static> {
     App::new("Logtopus tentacle")
-        .version(VERSION)
-        .author(AUTHORS)
+        .version(tentacle::version())
+        .author(tentacle::authors())
         .about("Provide logfile access for logtopus server")
         .arg(Arg::with_name("config")
             // .required(true)

@@ -38,8 +38,8 @@ impl actix::Handler<Message> for Streamer {
         let addr = ctx.address().clone();
         match msg {
             Message::StreamFilePath(filepath) => {
-                let path = std::path::Path::new("/var/log/alternatives.log");
-                let open_fut = tokio::fs::File::open(path)
+//                let path = std::path::Path::new(&(filepath.clone()));
+                let open_fut = tokio::fs::File::open(filepath)
                     .map(move |file| {
                         addr.do_send(Message::StreamFile(file));
                         ()
