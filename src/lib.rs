@@ -11,6 +11,7 @@ extern crate log;
 extern crate serde_derive;
 extern crate tokio;
 extern crate tokio_threadpool;
+extern crate uuid;
 
 use constants::VERSION;
 use constants::AUTHORS;
@@ -18,7 +19,7 @@ use constants::AUTHORS;
 mod constants;
 mod cfg;
 mod server;
-mod app;
+mod state;
 mod streamer;
 
 pub fn version() -> &'static str {

@@ -1,11 +1,11 @@
-
 use actix;
 use actix::AsyncContext;
 use futures::Future;
 use futures::Sink;
 use futures::Stream;
 
-use app;
+use state;
+use std::io;
 
 #[derive(Debug)]
 pub enum Message {
@@ -18,12 +18,12 @@ impl actix::Message for Message {
 }
 
 pub struct Streamer {
-    state: app::ServerState,
+    state: state::ServerState,
     tx: futures::sync::mpsc::Sender<String>,
 }
 
 impl Streamer {
-    pub fn new(state: app::ServerState, tx: futures::sync::mpsc::Sender<String>) -> Streamer {
+    pub fn new(state: state::ServerState, tx: futures::sync::mpsc::Sender<String>) -> Streamer {
         Streamer {
             state,
             tx,
@@ -45,24 +45,33 @@ impl actix::Handler<Message> for Streamer {
                         ()
                     }).map_err(|e| error!("File open error: {:?}", e));
 
-                self.state.spawn_blocking(open_fut);
+                let r = self.state.spawn_blocking(open_fut);
+                if let Err(e) = r {
+                    error!("Spawn error: {:?}", e);
+                }
+                ()
             }
             Message::StreamFile(file) => {
                 debug!("Starting stream for file handle: {:?}", file);
                 let linereader = tokio::codec::FramedRead::new(file, tokio::codec::LinesCodec::new_with_max_length(2048));
                 let mut tx = self.tx.clone();
-                self.state.spawn_blocking(linereader
+// Not working, since file reading requires extra tokio runtime
+// ctx.add_stream(linereader);
+                let r = self.state.spawn_blocking(linereader
                     .for_each(move |s| {
-                        tx.start_send(s + "\n");
-                        Ok(())
+                        match tx.start_send(s + "\n") {
+                            Ok(_) => Ok(()),
+                            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.to_string()))
+                        }
                     })
                     .map_err(|e| {
                         error!("Stream error: {:?}", e);
                     })
                 );
-
-// Not working, since file reading requires extra tokio runtime
-// ctx.add_stream(linereader);
+                if let Err(e) = r {
+                    error!("Spawn error: {:?}", e);
+                }
+                ()
             }
         }
     }
