@@ -28,7 +28,7 @@ pub fn read_config(maybe_filename: &Option<&str>) -> Result<config::Config, Stri
 
 #[cfg(test)]
 mod tests {
-    use cfg;
+    use crate::cfg;
 
     #[test]
     fn test_read_config() {

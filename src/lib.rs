@@ -13,8 +13,8 @@ extern crate tokio;
 extern crate tokio_threadpool;
 extern crate uuid;
 
-use constants::VERSION;
-use constants::AUTHORS;
+use crate::constants::VERSION;
+use crate::constants::AUTHORS;
 
 mod constants;
 mod cfg;

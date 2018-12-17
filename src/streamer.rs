@@ -4,7 +4,7 @@ use futures::Future;
 use futures::Sink;
 use futures::Stream;
 
-use state;
+use crate::state;
 use std::io;
 
 #[derive(Debug)]

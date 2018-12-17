@@ -1,4 +1,5 @@
 [package]
+edition = "2018"
 name = "tentacle"
 version = "0.1.0"
 authors = ["niveau0 <plingplong@t-online.de>", "kodemaniak <carsten@kodemaniak.de>"]

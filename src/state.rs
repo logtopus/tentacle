@@ -1,5 +1,5 @@
 use failure::Fail;
-use server;
+use crate::server;
 use std::sync::Arc;
 use std::sync::RwLock;
 use tokio::runtime::Runtime;
