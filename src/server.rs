@@ -115,7 +115,7 @@ fn health(_state: actix_web::State<ServerState>) -> HttpResponse {
 
 fn add_source((json, state): (actix_web::Json<SourceSpec>, actix_web::State<ServerState>)) -> HttpResponse {
     debug!("add_source");
-    let response = match state::Source::try_from_spec(json.into_inner()) {
+    let response = match state::LogSource::try_from_spec(json.into_inner()) {
         Ok(src) => {
             match state.clone().add_source(src) {
                 Ok(key) =>
@@ -137,7 +137,7 @@ fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
     let lock = sources.read();
     match lock {
         Ok(locked_vec) => {
-            let dto: Vec<SourceRepr> = locked_vec.iter().map(|src| state::Source::into_repr(src)).collect();
+            let dto: Vec<SourceRepr> = locked_vec.iter().map(|src| state::LogSource::into_repr(src)).collect();
             HttpResponse::Ok().json(dto)
         }
         Err(_) => HttpResponse::InternalServerError().finish()
@@ -154,9 +154,9 @@ fn get_source_content(id: actix_web::Path<String>, state: actix_web::State<Serve
         .from_err()
         .and_then(|maybe_src| {
             match maybe_src {
-                Some(state::Source::File { key: _, path }) => Box::new(stream_file(state, &path)),
-                Some(state::Source::Url) => { unimplemented!() }
-                Some(state::Source::Journal) => { unimplemented!() }
+                Some(state::LogSource::File { key: _, path }) => Box::new(stream_file(state, &path)),
+                Some(state::LogSource::Url) => { unimplemented!() }
+                Some(state::LogSource::Journal) => { unimplemented!() }
                 None => futures::future::ok(HttpResponse::NotFound().finish()).responder()
             }
         });
@@ -222,7 +222,7 @@ mod tests {
 //    #[test]
 //    fn test_get_source_content_handler() {
 //        let mut state = super::ServerState::new();
-//        state.add_source(state::Source::File { key: "id".to_string(), path: "dummypath".to_string() }).unwrap();
+//        state.add_source(state::LogSource::File { key: "id".to_string(), path: "dummypath".to_string() }).unwrap();
 //
 //        let req = test::TestRequest::with_state(state).header("content-type", "text/plain").finish();
 //        let resp = super::get_source_content(actix_web::Path::from("id".to_string()), State::extract(&req));

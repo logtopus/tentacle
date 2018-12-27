@@ -8,11 +8,11 @@ use std::sync::Mutex;
 use std::io;
 use uuid::Uuid;
 
-type Sources = Arc<RwLock<Vec<Source>>>;
+type LogSources = Arc<RwLock<Vec<LogSource>>>;
 
 #[derive(Fail, Debug)]
 pub enum ApplicationError {
-    #[fail(display = "Source already exists")]
+    #[fail(display = "LogSource already exists")]
     SourceAlreadyAdded,
     #[fail(display = "Failed to store source")]
     FailedToWriteSource,
@@ -30,18 +30,18 @@ pub enum SourceType {
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
-pub enum Source {
+pub enum LogSource {
     File { key: String, path: String },
     Url,
     Journal,
 }
 
-impl Source {
-    pub fn try_from_spec(dto: server::SourceSpec) -> Result<Source, ApplicationError> {
+impl LogSource {
+    pub fn try_from_spec(dto: server::SourceSpec) -> Result<LogSource, ApplicationError> {
         match dto.src_type {
             SourceType::File => {
                 match dto.path {
-                    Some(p) => Ok(Source::File {
+                    Some(p) => Ok(LogSource::File {
                         key: dto.key.unwrap_or_else(|| Uuid::new_v4().to_string()),
                         path: p,
                     }),
@@ -55,24 +55,24 @@ impl Source {
         }
     }
 
-    pub fn into_repr(src: &Source) -> server::SourceRepr {
+    pub fn into_repr(src: &LogSource) -> server::SourceRepr {
         match src {
-            Source::File { key, path } =>
+            LogSource::File { key, path } =>
                 server::SourceRepr {
                     key: key.clone(),
                     src_type: SourceType::File,
                     path: Some(path.clone()),
                 },
-            Source::Url =>
+            LogSource::Url =>
                 unimplemented!(),
-            Source::Journal =>
+            LogSource::Journal =>
                 unimplemented!()
         }
     }
 }
 
 pub struct ServerState {
-    sources: Sources,
+    sources: LogSources,
     blk_rt: Arc<Mutex<Runtime>>,
 }
 
@@ -104,7 +104,7 @@ impl ServerState {
         }
     }
 
-    pub fn add_source(&mut self, source: Source) -> Result<String, ApplicationError> {
+    pub fn add_source(&mut self, source: LogSource) -> Result<String, ApplicationError> {
         let key = Self::extract_source_key(&source);
         let mut locked_vec = self.sources.write().map_err(|_| ApplicationError::FailedToWriteSource)?;
 
@@ -117,25 +117,25 @@ impl ServerState {
         }
     }
 
-    fn extract_source_key(source: &Source) -> String {
+    fn extract_source_key(source: &LogSource) -> String {
         match source {
-            Source::File { key, path: _ } => key.clone(),
-            Source::Url =>
+            LogSource::File { key, path: _ } => key.clone(),
+            LogSource::Url =>
                 unimplemented!(),
-            Source::Journal =>
+            LogSource::Journal =>
                 unimplemented!(),
         }
     }
 
-    pub fn get_sources(&self) -> Sources {
+    pub fn get_sources(&self) -> LogSources {
         self.sources.clone()
     }
 
-    pub fn get_source<'a>(&'a self, key: &'a str) -> impl Future<Item=Option<Source>, Error=ApplicationError> {
+    pub fn get_source<'a>(&'a self, key: &'a str) -> impl Future<Item=Option<LogSource>, Error=ApplicationError> {
         futures::future::result(self.lookup_source(key))
     }
 
-    fn lookup_source(&self, key: &str) -> Result<Option<Source>, ApplicationError> {
+    fn lookup_source(&self, key: &str) -> Result<Option<LogSource>, ApplicationError> {
         let locked_vec = self.sources.read().map_err(|_| ApplicationError::FailedToReadSource)?;
         let maybe_src = locked_vec.iter().find(|src| Self::extract_source_key(src) == key);
         Ok(maybe_src.map(|s| (*s).clone()))
