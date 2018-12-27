@@ -131,10 +131,13 @@ impl ServerState {
         self.sources.clone()
     }
 
-    pub fn get_source<'a>(&'a self, key: &'a str) -> Result<Option<Source>, ApplicationError> {
+    pub fn get_source<'a>(&'a self, key: &'a str) -> impl Future<Item=Option<Source>, Error=ApplicationError> {
+        futures::future::result(self.lookup_source(key))
+    }
+
+    fn lookup_source(&self, key: &str) -> Result<Option<Source>, ApplicationError> {
         let locked_vec = self.sources.read().map_err(|_| ApplicationError::FailedToReadSource)?;
         let maybe_src = locked_vec.iter().find(|src| Self::extract_source_key(src) == key);
-
         Ok(maybe_src.map(|s| (*s).clone()))
     }
 }
