@@ -6,7 +6,6 @@ use tokio::runtime::Runtime;
 use futures::Future;
 use std::sync::Mutex;
 use std::io;
-use uuid::Uuid;
 
 type LogSources = Arc<RwLock<Vec<LogSource>>>;
 
@@ -23,48 +22,40 @@ pub enum ApplicationError {
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd)]
-pub enum SourceType {
+pub enum LogSourceType {
     File,
-    Url,
     Journal, // see https://docs.rs/systemd/0.0.8/systemd/journal/index.html
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Clone)]
 pub enum LogSource {
-    File { key: String, path: String },
-    Url,
-    Journal,
+    File { path: String },
+    Journal
 }
 
 impl LogSource {
-    pub fn try_from_spec(dto: server::SourceSpec) -> Result<LogSource, ApplicationError> {
+    pub fn try_from_spec(dto: server::LogSourceSpec) -> Result<LogSource, ApplicationError> {
         match dto.src_type {
-            SourceType::File => {
+            LogSourceType::File => {
                 match dto.path {
                     Some(p) => Ok(LogSource::File {
-                        key: dto.key.unwrap_or_else(|| Uuid::new_v4().to_string()),
-                        path: p,
+                        path: p
                     }),
                     None => Err(ApplicationError::MissingAttribute { attr: "path".to_string() })
                 }
             }
-            SourceType::Url =>
-                unimplemented!(),
-            SourceType::Journal =>
+            LogSourceType::Journal =>
                 unimplemented!()
         }
     }
 
-    pub fn into_repr(src: &LogSource) -> server::SourceRepr {
+    pub fn into_repr(src: &LogSource) -> server::LogSourceRepr {
         match src {
-            LogSource::File { key, path } =>
-                server::SourceRepr {
-                    key: key.clone(),
-                    src_type: SourceType::File,
+            LogSource::File { path } =>
+                server::LogSourceRepr {
+                    src_type: LogSourceType::File,
                     path: Some(path.clone()),
                 },
-            LogSource::Url =>
-                unimplemented!(),
             LogSource::Journal =>
                 unimplemented!()
         }
@@ -111,17 +102,15 @@ impl ServerState {
         if locked_vec.iter().find(|src| Self::extract_source_key(src) == key).is_some() {
             Err(ApplicationError::SourceAlreadyAdded)
         } else {
-            let key = ServerState::extract_source_key(&source);
+            let key = ServerState::extract_source_key(&source).to_string();
             locked_vec.push(source);
             Ok(key)
         }
     }
 
-    fn extract_source_key(source: &LogSource) -> String {
+    fn extract_source_key(source: &LogSource) -> &String {
         match source {
-            LogSource::File { key, path: _ } => key.clone(),
-            LogSource::Url =>
-                unimplemented!(),
+            LogSource::File { path } => path,
             LogSource::Journal =>
                 unimplemented!(),
         }

@@ -49,16 +49,14 @@ impl ResponseError for state::ApplicationError {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SourceSpec {
-    pub key: Option<String>,
-    pub src_type: state::SourceType,
+pub struct LogSourceSpec {
+    pub src_type: state::LogSourceType,
     pub path: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SourceRepr {
-    pub key: String,
-    pub src_type: state::SourceType,
+pub struct LogSourceRepr {
+    pub src_type: state::LogSourceType,
     pub path: Option<String>,
 }
 
@@ -113,7 +111,7 @@ fn health(_state: actix_web::State<ServerState>) -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
-fn add_source((json, state): (actix_web::Json<SourceSpec>, actix_web::State<ServerState>)) -> HttpResponse {
+fn add_source((json, state): (actix_web::Json<LogSourceSpec>, actix_web::State<ServerState>)) -> HttpResponse {
     debug!("add_source");
     let response = match state::LogSource::try_from_spec(json.into_inner()) {
         Ok(src) => {
@@ -137,7 +135,7 @@ fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
     let lock = sources.read();
     match lock {
         Ok(locked_vec) => {
-            let dto: Vec<SourceRepr> = locked_vec.iter().map(|src| state::LogSource::into_repr(src)).collect();
+            let dto: Vec<LogSourceRepr> = locked_vec.iter().map(|src| state::LogSource::into_repr(src)).collect();
             HttpResponse::Ok().json(dto)
         }
         Err(_) => HttpResponse::InternalServerError().finish()
@@ -154,8 +152,7 @@ fn get_source_content(id: actix_web::Path<String>, state: actix_web::State<Serve
         .from_err()
         .and_then(|maybe_src| {
             match maybe_src {
-                Some(state::LogSource::File { key: _, path }) => Box::new(stream_file(state, &path)),
-                Some(state::LogSource::Url) => { unimplemented!() }
+                Some(state::LogSource::File { path }) => Box::new(stream_file(state, &path)),
                 Some(state::LogSource::Journal) => { unimplemented!() }
                 None => futures::future::ok(HttpResponse::NotFound().finish()).responder()
             }

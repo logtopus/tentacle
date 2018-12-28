@@ -11,7 +11,6 @@ extern crate log;
 extern crate serde_derive;
 extern crate tokio;
 extern crate tokio_threadpool;
-extern crate uuid;
 
 use crate::constants::VERSION;
 use crate::constants::AUTHORS;
