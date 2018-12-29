@@ -12,14 +12,15 @@ extern crate serde_derive;
 extern crate tokio;
 extern crate tokio_threadpool;
 
-use crate::constants::VERSION;
 use crate::constants::AUTHORS;
+use crate::constants::VERSION;
 
 mod constants;
 mod cfg;
 mod server;
 mod state;
 mod streamer;
+mod blocking;
 
 pub fn version() -> &'static str {
     VERSION

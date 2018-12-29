@@ -1,11 +1,9 @@
-use failure::Fail;
+use crate::blocking;
 use crate::server;
+use failure::Fail;
+use futures::Future;
 use std::sync::Arc;
 use std::sync::RwLock;
-use tokio::runtime::Runtime;
-use futures::Future;
-use std::sync::Mutex;
-use std::io;
 
 type LogSources = Arc<RwLock<Vec<LogSource>>>;
 
@@ -64,14 +62,14 @@ impl LogSource {
 
 pub struct ServerState {
     sources: LogSources,
-    blk_rt: Arc<Mutex<Runtime>>,
+    pub addr_blocking: actix::Addr<blocking::BlockingSpawner>
 }
 
 impl Clone for ServerState {
     fn clone(&self) -> Self {
         ServerState {
             sources: self.sources.clone(),
-            blk_rt: self.blk_rt.clone(),
+            addr_blocking: self.addr_blocking.clone()
         }
     }
 }
@@ -80,18 +78,7 @@ impl ServerState {
     pub fn new() -> ServerState {
         ServerState {
             sources: Arc::new(RwLock::new(vec![])),
-            blk_rt: Arc::new(Mutex::new(Runtime::new().unwrap())),
-        }
-    }
-
-    pub fn spawn_blocking(&self, f: impl Future<Item=(), Error=()> + Send + 'static) -> Result<(), io::Error> {
-        let mutex = self.blk_rt.lock();
-        match mutex {
-            Ok(mut rt) => {
-                (*rt).spawn(f);
-                Ok(())
-            }
-            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e.to_string()))
+            addr_blocking: actix::Arbiter::start(|_| blocking::BlockingSpawner::new())
         }
     }
 

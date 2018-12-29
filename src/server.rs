@@ -191,7 +191,7 @@ mod tests {
     use actix_web::Body;
     use actix_web::FromRequest;
     use actix_web::State;
-    use crate::state;
+//    use crate::state;
 
     #[test]
     fn test_index_handler() {
