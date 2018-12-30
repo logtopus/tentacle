@@ -1,7 +1,3 @@
-extern crate clap;
-extern crate config;
-extern crate env_logger;
-extern crate tentacle;
 #[macro_use]
 extern crate log;
 

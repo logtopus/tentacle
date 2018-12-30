@@ -1,5 +1,6 @@
-use config;
 use std::path::Path;
+
+use config;
 
 pub fn read_config(maybe_filename: &Option<&str>) -> Result<config::Config, String> {
     let mut settings = config::Config::new();

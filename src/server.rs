@@ -1,25 +1,21 @@
 use std;
 
 use actix;
-use actix::Actor;
 use actix_web;
-use actix_web::AsyncResponder;
 use actix_web::Binary;
 use actix_web::Body;
 use actix_web::error::ResponseError;
 use actix_web::http;
 use actix_web::HttpRequest;
 use actix_web::HttpResponse;
-use bytes::Bytes;
 use config;
 use futures;
-use futures::Future;
-use futures::Stream;
 
 use crate::constants::*;
+use crate::logsource::LogSource;
+use crate::logsourceport;
 use crate::state;
 use crate::state::ServerState;
-use crate::streamer;
 
 impl ResponseError for state::ApplicationError {
     fn error_response(&self) -> HttpResponse {
@@ -49,19 +45,6 @@ impl ResponseError for state::ApplicationError {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-pub struct LogSourceSpec {
-    pub src_type: state::LogSourceType,
-    pub path: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct LogSourceRepr {
-    pub src_type: state::LogSourceType,
-    pub path: Option<String>,
-}
-
-
-#[derive(Serialize, Deserialize, Debug)]
 struct ErrorResponse {
     message: String
 }
@@ -70,7 +53,15 @@ pub fn start_server(settings: &config::Config) {
     let port = settings.get_int("http.bind.port").unwrap();
     let ip = settings.get_str("http.bind.ip").unwrap();
     let addr: std::net::SocketAddr = format!("{}:{}", ip, port).parse().unwrap();
-    let server_state = ServerState::new();
+    let mut server_state = ServerState::new();
+
+    if let Ok(array) = settings.get_array("files") {
+        array.iter()
+            .for_each(|v| {
+                let src = LogSource::try_from_fileconfig(v.clone()).unwrap();
+                server_state.add_source(src).unwrap();
+            });
+    };
 
     actix_web::server::new(move || {
         vec![
@@ -82,12 +73,11 @@ pub fn start_server(settings: &config::Config) {
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .resource("/sources", |r| {
-                    r.post().with(add_source);
-                    r.get().with(get_sources);
+                    r.get().with(logsourceport::get_sources);
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .resource("/sources/{id}/content", |r| {
-                    r.get().with(get_source_content);
+                    r.get().with(logsourceport::get_source_content);
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .boxed(),
@@ -111,78 +101,6 @@ fn health(_state: actix_web::State<ServerState>) -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
-fn add_source((json, state): (actix_web::Json<LogSourceSpec>, actix_web::State<ServerState>)) -> HttpResponse {
-    debug!("add_source");
-    let response = match state::LogSource::try_from_spec(json.into_inner()) {
-        Ok(src) => {
-            match state.clone().add_source(src) {
-                Ok(key) =>
-                    HttpResponse::Created()
-                        .header(http::header::CONTENT_LOCATION, format!("/api/v1/sources/{}", key))
-                        .finish(),
-                Err(e) => e.error_response()
-            }
-        }
-        Err(e) => e.error_response()
-    };
-
-    response
-}
-
-
-fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
-    let sources = state.get_sources();
-    let lock = sources.read();
-    match lock {
-        Ok(locked_vec) => {
-            let dto: Vec<LogSourceRepr> = locked_vec.iter().map(|src| state::LogSource::into_repr(src)).collect();
-            HttpResponse::Ok().json(dto)
-        }
-        Err(_) => HttpResponse::InternalServerError().finish()
-    }
-}
-
-
-fn get_source_content(id: actix_web::Path<String>, state: actix_web::State<ServerState>) -> actix_web::FutureResponse<HttpResponse>
-{
-    debug!("Content for source {} requested", id);
-
-    let src_lookup = state.get_source(id.as_ref());
-    let result = src_lookup
-        .from_err()
-        .and_then(|maybe_src| {
-            match maybe_src {
-                Some(state::LogSource::File { path }) => Box::new(stream_file(state, &path)),
-                Some(state::LogSource::Journal) => { unimplemented!() }
-                None => futures::future::ok(HttpResponse::NotFound().finish()).responder()
-            }
-        });
-
-    result.responder()
-}
-
-fn stream_file(state: actix_web::State<ServerState>, path: &String) -> impl Future<Item=HttpResponse, Error=actix_web::Error> {
-    let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
-    let streamer = streamer::Streamer::new(state.clone(), tx).start();
-    let request = streamer.send(streamer::Message::StreamFilePath(path.to_string()));
-
-    request
-        .map_err(|e| { error!("{}",e); e })
-        .from_err()
-        .and_then(|result| {
-            result
-                .map_err(|e| { error!("{}",e); e.into() })
-                .map(|_| {
-                    HttpResponse::Ok()
-                        .content_encoding(actix_web::http::ContentEncoding::Identity)
-                        .content_type("text/plain")
-                        .streaming(rx_body
-                            .map_err(|_| actix_web::error::PayloadError::Incomplete)
-                            .map(|s| Bytes::from(s)))
-                })
-        })
-}
-
 #[cfg(test)]
 mod tests {
     use std;
@@ -191,6 +109,7 @@ mod tests {
     use actix_web::Body;
     use actix_web::FromRequest;
     use actix_web::State;
+
 //    use crate::state;
 
     #[test]

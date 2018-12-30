@@ -1,16 +1,7 @@
-extern crate actix;
-extern crate actix_web;
-extern crate bytes;
-extern crate config;
-extern crate failure;
-extern crate futures;
-extern crate http;
 #[macro_use]
 extern crate log;
 #[macro_use]
 extern crate serde_derive;
-extern crate tokio;
-extern crate tokio_threadpool;
 
 use crate::constants::AUTHORS;
 use crate::constants::VERSION;
@@ -19,7 +10,9 @@ mod constants;
 mod cfg;
 mod server;
 mod state;
-mod streamer;
+mod logsource;
+mod logsourceport;
+mod logsourcesvc;
 mod blocking;
 
 pub fn version() -> &'static str {

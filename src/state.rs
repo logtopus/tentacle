@@ -1,9 +1,11 @@
-use crate::blocking;
-use crate::server;
-use failure::Fail;
-use futures::Future;
 use std::sync::Arc;
 use std::sync::RwLock;
+
+use failure::Fail;
+use futures::Future;
+
+use crate::blocking;
+use crate::logsource::LogSource;
 
 type LogSources = Arc<RwLock<Vec<LogSource>>>;
 
@@ -19,57 +21,16 @@ pub enum ApplicationError {
     MissingAttribute { attr: String },
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd)]
-pub enum LogSourceType {
-    File,
-    Journal, // see https://docs.rs/systemd/0.0.8/systemd/journal/index.html
-}
-
-#[derive(Debug, PartialEq, PartialOrd, Clone)]
-pub enum LogSource {
-    File { path: String },
-    Journal
-}
-
-impl LogSource {
-    pub fn try_from_spec(dto: server::LogSourceSpec) -> Result<LogSource, ApplicationError> {
-        match dto.src_type {
-            LogSourceType::File => {
-                match dto.path {
-                    Some(p) => Ok(LogSource::File {
-                        path: p
-                    }),
-                    None => Err(ApplicationError::MissingAttribute { attr: "path".to_string() })
-                }
-            }
-            LogSourceType::Journal =>
-                unimplemented!()
-        }
-    }
-
-    pub fn into_repr(src: &LogSource) -> server::LogSourceRepr {
-        match src {
-            LogSource::File { path } =>
-                server::LogSourceRepr {
-                    src_type: LogSourceType::File,
-                    path: Some(path.clone()),
-                },
-            LogSource::Journal =>
-                unimplemented!()
-        }
-    }
-}
-
 pub struct ServerState {
     sources: LogSources,
-    pub addr_blocking: actix::Addr<blocking::BlockingSpawner>
+    addr_blocking: actix::Addr<blocking::BlockingSpawner>,
 }
 
 impl Clone for ServerState {
     fn clone(&self) -> Self {
         ServerState {
             sources: self.sources.clone(),
-            addr_blocking: self.addr_blocking.clone()
+            addr_blocking: self.addr_blocking.clone(),
         }
     }
 }
@@ -78,20 +39,23 @@ impl ServerState {
     pub fn new() -> ServerState {
         ServerState {
             sources: Arc::new(RwLock::new(vec![])),
-            addr_blocking: actix::Arbiter::start(|_| blocking::BlockingSpawner::new())
+            addr_blocking: actix::Arbiter::start(|_| blocking::BlockingSpawner::new()),
         }
     }
 
-    pub fn add_source(&mut self, source: LogSource) -> Result<String, ApplicationError> {
+    pub fn run_blocking(&self, message: blocking::Message) {
+        self.addr_blocking.do_send(message)
+    }
+
+    pub fn add_source(&mut self, source: LogSource) -> Result<(), ApplicationError> {
         let key = Self::extract_source_key(&source);
         let mut locked_vec = self.sources.write().map_err(|_| ApplicationError::FailedToWriteSource)?;
 
         if locked_vec.iter().find(|src| Self::extract_source_key(src) == key).is_some() {
             Err(ApplicationError::SourceAlreadyAdded)
         } else {
-            let key = ServerState::extract_source_key(&source).to_string();
             locked_vec.push(source);
-            Ok(key)
+            Ok(())
         }
     }
 

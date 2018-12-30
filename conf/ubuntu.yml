@@ -1,0 +1,4 @@
+files:
+  - path: /var/log/auth.log
+  - path: /var/log/alternatives.log
+  - path: /var/log/dpkg.log
