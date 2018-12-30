@@ -27,12 +27,26 @@ pub struct LogSourceRepr {
     pub path: Option<String>,
 }
 
+impl From<&LogSource> for LogSourceRepr {
+    fn from(src: &LogSource) -> Self {
+        match src {
+            LogSource::File { path } =>
+                LogSourceRepr {
+                    src_type: LogSourceType::File,
+                    path: Some(path.clone()),
+                },
+            LogSource::Journal =>
+                unimplemented!()
+        }
+    }
+}
+
 pub fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
     let sources = state.get_sources();
     let lock = sources.read();
     match lock {
         Ok(locked_vec) => {
-            let dto: Vec<LogSourceRepr> = locked_vec.iter().map(|src| LogSource::into_repr(src)).collect();
+            let dto: Vec<LogSourceRepr> = locked_vec.iter().map(|src| LogSourceRepr::from(src)).collect();
             HttpResponse::Ok().json(dto)
         }
         Err(_) => HttpResponse::InternalServerError().finish()

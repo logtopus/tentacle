@@ -1,7 +1,6 @@
 use config::ConfigError;
 use config::Value;
 
-use crate::logsourceport::LogSourceRepr;
 use crate::logsourceport::LogSourceSpec;
 use crate::state::ApplicationError;
 
@@ -36,18 +35,6 @@ impl LogSource {
                 }
             }
             LogSourceType::Journal =>
-                unimplemented!()
-        }
-    }
-
-    pub fn into_repr(src: &LogSource) -> LogSourceRepr {
-        match src {
-            LogSource::File { path } =>
-                LogSourceRepr {
-                    src_type: LogSourceType::File,
-                    path: Some(path.clone()),
-                },
-            LogSource::Journal =>
                 unimplemented!()
         }
     }
