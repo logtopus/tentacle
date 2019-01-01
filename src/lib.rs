@@ -10,6 +10,7 @@ mod constants;
 mod cfg;
 mod server;
 mod state;
+mod logcodec;
 mod logsource;
 mod logsourceport;
 mod logsourcesvc;

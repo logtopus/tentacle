@@ -6,6 +6,8 @@ use futures::Sink;
 use futures::Stream;
 use tokio::runtime::Runtime;
 
+use crate::logcodec::LogCodec;
+
 #[derive(Debug)]
 pub enum Message {
     StreamFile(tokio::fs::File, futures::sync::mpsc::Sender<String>),
@@ -53,7 +55,7 @@ impl actix::Handler<Message> for BlockingSpawner {
                 debug!("Starting stream for file handle: {:?}", file);
                 let linereader = tokio::codec::FramedRead::new(
                     file,
-                    tokio::codec::LinesCodec::new_with_max_length(2048),
+                    LogCodec::new(2048)
                 );
                 self.spawn(
                     linereader
