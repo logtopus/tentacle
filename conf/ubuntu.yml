@@ -1,4 +1,6 @@
 files:
   - path: /var/log/auth.log
   - path: /var/log/alternatives.log
+  - path: /var/log/boot.log
   - path: /var/log/dpkg.log
+  - path: /var/log/syslog
