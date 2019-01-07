@@ -1,6 +1,14 @@
-files:
-  - path: /var/log/auth.log
-  - path: /var/log/alternatives.log
-  - path: /var/log/boot.log
-  - path: /var/log/dpkg.log
-  - path: /var/log/syslog
+
+sources:
+  - id: system-auth
+    type: log
+    file_pattern: /var/log/auth\.log(\.\d(\.gz)?)?
+    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{DATA:message}"
+  - id: system-syslog
+    type: log
+    file_pattern: /var/log/syslog(\.\d(\.gz)?)?
+    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{DATA:message}"
+  - id: system-sshd
+    type: journal
+    unit: sshd
+    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{DATA:message}"

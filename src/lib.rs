@@ -12,9 +12,8 @@ mod server;
 mod state;
 mod logcodec;
 mod logsource;
-mod logsourceport;
-mod logsourcesvc;
-mod blocking;
+mod logsource_port;
+mod logsource_svc;
 
 pub fn version() -> &'static str {
     VERSION

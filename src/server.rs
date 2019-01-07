@@ -13,13 +13,18 @@ use futures;
 
 use crate::constants::*;
 use crate::logsource::LogSource;
-use crate::logsourceport;
+use crate::logsource_port;
 use crate::state;
 use crate::state::ServerState;
 
 impl ResponseError for state::ApplicationError {
     fn error_response(&self) -> HttpResponse {
         match *self {
+            state::ApplicationError::SourceNotFound => {
+                HttpResponse::NotFound()
+                    .header(http::header::CONTENT_TYPE, "application/json")
+                    .json(ErrorResponse { message: self.to_string() })
+            }
             state::ApplicationError::SourceAlreadyAdded => {
                 HttpResponse::BadRequest()
                     .header(http::header::CONTENT_TYPE, "application/json")
@@ -35,11 +40,11 @@ impl ResponseError for state::ApplicationError {
                     .header(http::header::CONTENT_TYPE, "application/json")
                     .json(ErrorResponse { message: self.to_string() })
             }
-            state::ApplicationError::MissingAttribute { attr: _ } => {
-                HttpResponse::BadRequest()
-                    .header(http::header::CONTENT_TYPE, "application/json")
-                    .json(ErrorResponse { message: self.to_string() })
-            }
+//            state::ApplicationError::MissingAttribute { attr: _ } => {
+//                HttpResponse::BadRequest()
+//                    .header(http::header::CONTENT_TYPE, "application/json")
+//                    .json(ErrorResponse { message: self.to_string() })
+//            }
         }
     }
 }
@@ -49,19 +54,24 @@ struct ErrorResponse {
     message: String
 }
 
+fn parse_files(settings: &config::Config, server_state: &mut ServerState) {
+    if let Ok(array) = settings.get_array("sources") {
+        array.iter()
+            .for_each(|v| {
+                let src = LogSource::try_from_config(v).unwrap();
+                server_state.add_source(src).unwrap();
+            });
+    };
+}
+
 pub fn start_server(settings: &config::Config) {
     let port = settings.get_int("http.bind.port").unwrap();
     let ip = settings.get_str("http.bind.ip").unwrap();
     let addr: std::net::SocketAddr = format!("{}:{}", ip, port).parse().unwrap();
+
     let mut server_state = ServerState::new();
 
-    if let Ok(array) = settings.get_array("files") {
-        array.iter()
-            .for_each(|v| {
-                let src = LogSource::try_from_fileconfig(v.clone()).unwrap();
-                server_state.add_source(src).unwrap();
-            });
-    };
+    parse_files(&settings, &mut server_state);
 
     actix_web::server::new(move || {
         vec![
@@ -73,11 +83,11 @@ pub fn start_server(settings: &config::Config) {
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .resource("/sources", |r| {
-                    r.get().with(logsourceport::get_sources);
+                    r.get().with(logsource_port::get_sources);
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .resource("/sources/{id}/content", |r| {
-                    r.get().with(logsourceport::get_source_content);
+                    r.get().with(logsource_port::get_source_content);
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .boxed(),
@@ -105,17 +115,18 @@ fn health(_state: actix_web::State<ServerState>) -> HttpResponse {
 mod tests {
     use std;
 
-    use actix_web::{http, test};
+    use actix_web::http;
     use actix_web::Body;
     use actix_web::FromRequest;
     use actix_web::State;
+    use actix_web::test::TestRequest;
 
 //    use crate::state;
 
     #[test]
     fn test_index_handler() {
-        let resp = test::TestRequest::with_header("content-type", "text/plain")
-            .run(&super::index)
+        let resp = TestRequest::with_header("content-type", "text/plain")
+            .execute(&super::index)
             .unwrap();
         assert_eq!(resp.status(), http::StatusCode::OK);
 
@@ -129,28 +140,13 @@ mod tests {
 
     #[test]
     fn test_health_handler() {
-        let state = super::ServerState::new();
-        let req = test::TestRequest::with_state(state).finish();
-        let resp = super::health(State::extract(&req));
-        assert_eq!(resp.status(), http::StatusCode::OK);
-    }
+        actix::System::run(|| {
+            let state = super::ServerState::new();
+            let req = TestRequest::with_state(state).finish();
+            let resp = super::health(State::extract(&req));
+            assert_eq!(resp.status(), http::StatusCode::OK);
 
-//    #[test]
-//    fn test_get_source_content_handler() {
-//        let mut state = super::ServerState::new();
-//        state.add_source(state::LogSource::File { key: "id".to_string(), path: "dummypath".to_string() }).unwrap();
-//
-//        let req = test::TestRequest::with_state(state).header("content-type", "text/plain").finish();
-//        let resp = super::get_source_content(actix_web::Path::from("id".to_string()), State::extract(&req));
-//
-//        println!("before spawn");
-//        let result = futures::executor::spawn(resp).wait_future().unwrap();
-//        println!("after spawn");
-//        assert_eq!(result.status(), http::StatusCode::OK, "Response was {:?}", result.body());
-//
-//        match result.body() {
-//            Body::Streaming(_) => (),
-//            t => assert!(false, format!("Wrong body type {:?}", t))
-//        }
-//    }
+            actix::System::current().stop();
+        });
+    }
 }

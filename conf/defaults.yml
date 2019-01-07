@@ -2,6 +2,15 @@ http.bind.port: 8080
 #http.bind.ip: 0.0.0.0
 http.bind.ip: 127.0.0.1
 
-# log files served by tentacle, default: None
-#files:
-#  - path: /var/log/messages.log
+# Log files served by tentacle, default: None
+# Example:
+#
+#sources:
+#  - id: system-auth
+#    type: log
+#    file_pattern: /var/log/auth\.log(\.\d(\.gz)?)?
+#    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{DATA:message}"
+#  - id: system-syslog
+#    type: log
+#    file_pattern: /var/log/syslog(\.\d(\.gz)?)?
+#    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{DATA:message}"
