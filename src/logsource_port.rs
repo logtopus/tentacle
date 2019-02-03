@@ -4,7 +4,6 @@ use actix_web;
 use actix_web::AsyncResponder;
 use actix_web::HttpResponse;
 use bytes::Bytes;
-use config;
 use futures;
 use futures::Future;
 use futures::Stream;
@@ -13,13 +12,8 @@ use crate::logsource::LogSource;
 use crate::logsource::LogSourceType;
 use crate::logsource_svc::LogSourceService;
 use crate::logsource_svc::LogSourceServiceMessage;
+use crate::logsource_svc::StreamEntry;
 use crate::state::ServerState;
-
-//#[derive(Serialize, Deserialize, Debug)]
-//pub struct LogSourceSpec {
-//    pub src_type: LogSourceType,
-//    pub id: Option<String>,
-//}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LogSourceRepr {
@@ -36,7 +30,7 @@ pub struct LogSourceRepr {
 impl From<&LogSource> for LogSourceRepr {
     fn from(src: &LogSource) -> Self {
         match src {
-            LogSource::File { id, file_pattern, line_pattern } =>
+            LogSource::File { id, file_pattern, line_pattern, grok_pattern: _ } =>
                 LogSourceRepr {
                     src_type: LogSourceType::File,
                     id: id.clone(),
@@ -44,7 +38,7 @@ impl From<&LogSource> for LogSourceRepr {
                     file_pattern: Some(file_pattern.as_str().to_string()),
                     unit: None,
                 },
-            LogSource::Journal { id, unit, line_pattern } =>
+            LogSource::Journal { id, unit, line_pattern, grok_pattern: _ } =>
                 LogSourceRepr {
                     src_type: LogSourceType::Journal,
                     id: id.clone(),
@@ -68,8 +62,7 @@ pub fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
     }
 }
 
-
-pub fn get_source_content(id: actix_web::Path<String>, state: actix_web::State<ServerState>) -> actix_web::FutureResponse<HttpResponse> {
+fn get_source_content(id: actix_web::Path<String>, state: actix_web::State<ServerState>, as_json: bool) -> actix_web::FutureResponse<HttpResponse> {
     debug!("Content for source {} requested", id);
 
     let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
@@ -82,7 +75,7 @@ pub fn get_source_content(id: actix_web::Path<String>, state: actix_web::State<S
             e
         })
         .from_err()
-        .and_then(|result| {
+        .and_then(move |result| {
             result
                 .map_err(|e| {
                     error!("{}", e);
@@ -94,10 +87,53 @@ pub fn get_source_content(id: actix_web::Path<String>, state: actix_web::State<S
                         .content_type("text/plain")
                         .streaming(rx_body
                             .map_err(|_| actix_web::error::PayloadError::Incomplete)
-                            .map(|s| Bytes::from(s)))
+                            .map(move |stream_entry| {
+                                if as_json {
+                                    match serde_json::to_vec(&parse_line(&stream_entry)) {
+                                        Ok(vec) => Bytes::from(vec),
+                                        Err(e) => {
+                                            error!("Failed to convert stream entry to json: {}", e);
+                                            Bytes::new()
+                                        }
+                                    }
+                                } else {
+                                    Bytes::from(stream_entry.line)
+                                }
+                            }))
                 })
         })
         .responder()
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ParsedLine {
+    timestamp: String,
+    message: String
+}
+
+fn parse_line(stream_entry: &StreamEntry) -> ParsedLine {
+    let maybe_matches = stream_entry.pattern.match_against(&stream_entry.line);
+
+    if let Some(matches) = maybe_matches {
+        ParsedLine {
+            timestamp: matches.get("timestamp").unwrap_or("1970-01-01T00:00+00:00").to_string(),
+            message: matches.get("message").unwrap_or("").to_string(),
+        }
+    } else {
+        ParsedLine {
+            timestamp: "1970-01-01T00:00+00:00".to_string(),
+            message: "<failed to parse entry>".to_string(),
+        }
+    }
+}
+
+pub fn get_source_content_text(id: actix_web::Path<String>, state: actix_web::State<ServerState>) -> actix_web::FutureResponse<HttpResponse> {
+    get_source_content(id, state, false)
+}
+
+
+pub fn get_source_content_json(id: actix_web::Path<String>, state: actix_web::State<ServerState>) -> actix_web::FutureResponse<HttpResponse> {
+    get_source_content(id, state, true)
 }
 
 //#[cfg(test)]

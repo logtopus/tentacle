@@ -1,6 +1,5 @@
 use std;
 
-use actix;
 use actix_web;
 use actix_web::Binary;
 use actix_web::Body;
@@ -9,7 +8,7 @@ use actix_web::http;
 use actix_web::HttpRequest;
 use actix_web::HttpResponse;
 use config;
-use futures;
+use std::sync::Arc;
 
 use crate::constants::*;
 use crate::logsource::LogSource;
@@ -58,7 +57,8 @@ fn parse_files(settings: &config::Config, server_state: &mut ServerState) {
     if let Ok(array) = settings.get_array("sources") {
         array.iter()
             .for_each(|v| {
-                let src = LogSource::try_from_config(v).unwrap();
+                let grok = Arc::get_mut(&mut server_state.grok).unwrap();
+                let src = LogSource::try_from_config(v, grok).unwrap();
                 server_state.add_source(src).unwrap();
             });
     };
@@ -87,7 +87,8 @@ pub fn start_server(settings: &config::Config) {
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .resource("/sources/{id}/content", |r| {
-                    r.get().with(logsource_port::get_source_content);
+                    r.get().filter(actix_web::pred::Header("Accept", "application/json")).with(logsource_port::get_source_content_json);
+                    r.get().filter(actix_web::pred::Header("Accept", "text/plain")).with(logsource_port::get_source_content_text);
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .boxed(),

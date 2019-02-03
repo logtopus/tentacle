@@ -7,13 +7,14 @@ use futures::Sink;
 use futures::Stream;
 
 use crate::logcodec::LogCodec;
-use crate::state;
 use crate::logsource::LogSource;
-use std::fs::read_dir;
-use regex::Regex;
+use crate::state;
 use crate::state::ApplicationError;
-use std::path::Path;
+use regex::Regex;
+use std::fs::read_dir;
 use std::fs::DirEntry;
+use std::path::Path;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 #[derive(Debug)]
@@ -25,20 +26,29 @@ impl actix::Message for LogSourceServiceMessage {
     type Result = core::result::Result<(), ApplicationError>;
 }
 
+pub struct StreamEntry {
+    pub line: String,
+    pub pattern: Arc<grok::Pattern>,
+}
+
 pub struct LogSourceService {
     state: state::ServerState,
-    tx: futures::sync::mpsc::Sender<String>,
+    tx: futures::sync::mpsc::Sender<StreamEntry>,
 }
 
 impl LogSourceService {
-    pub fn new(state: state::ServerState, tx: futures::sync::mpsc::Sender<String>) -> LogSourceService {
-        LogSourceService {
-            state,
-            tx,
-        }
+    pub fn new(
+        state: state::ServerState,
+        tx: futures::sync::mpsc::Sender<StreamEntry>,
+    ) -> LogSourceService {
+        LogSourceService { state, tx }
     }
 
-    fn stream_file(&mut self, path: &str) -> Result<(), ApplicationError> {
+    fn stream_file(
+        &mut self,
+        path: &str,
+        pattern: Arc<grok::Pattern>,
+    ) -> Result<(), ApplicationError> {
         let metadata = fs::metadata(&path).map_err(|_| ApplicationError::FailedToReadSource)?;
 
         match metadata.is_dir() {
@@ -50,31 +60,32 @@ impl LogSourceService {
                     .map(|f| {
                         let tokio_file = tokio::fs::File::from_std(f);
 
-                        let linereader = tokio::codec::FramedRead::new(
-                            tokio_file,
-                            LogCodec::new(2048),
-                        );
+                        let linereader =
+                            tokio::codec::FramedRead::new(tokio_file, LogCodec::new(2048));
                         let tx = self.tx.clone();
-                        let future =
-                            linereader
-                                .forward(
-                                    tx.sink_map_err(|e| {
-                                        io::Error::new(io::ErrorKind::Other, e.to_string())
-                                    }),
-                                )
-                                .map(|_| ())
-                                .map_err(|e| {
-                                    error!("Stream error: {:?}", e);
-                                });
+                        let future = linereader
+                            .map(move |s| StreamEntry {
+                                line: s,
+                                pattern: pattern.clone(),
+                            })
+                            .forward(tx.sink_map_err(|e| {
+                                io::Error::new(io::ErrorKind::Other, e.to_string())
+                            }))
+                            .map(|_| ())
+                            .map_err(|e| {
+                                error!("Stream error: {:?}", e);
+                            });
                         self.state.run_blocking(future);
                     })
             }
-            true => Err(ApplicationError::FailedToReadSource)
+            true => Err(ApplicationError::FailedToReadSource),
         }
     }
 
     fn resolve_files(file_pattern: &Regex) -> Result<Vec<String>, ApplicationError> {
-        let folder = Path::new(file_pattern.as_str()).parent().ok_or(ApplicationError::FailedToReadSource)?;
+        let folder = Path::new(file_pattern.as_str())
+            .parent()
+            .ok_or(ApplicationError::FailedToReadSource)?;
         debug!("Reading folder {:?}", folder);
 
         let files_iter = read_dir(folder)
@@ -85,10 +96,10 @@ impl LogSourceService {
             .filter_map(Result::ok)
             .map(|entry: DirEntry| {
                 trace!("Found entry {:?}", entry);
-                entry.path().to_str()
-                    .filter(|path| {
-                        file_pattern.is_match(path)
-                    })
+                entry
+                    .path()
+                    .to_str()
+                    .filter(|path| file_pattern.is_match(path))
                     .filter(|path| {
                         debug!("matching file: {}", path);
                         if path.ends_with(".gz") {
@@ -103,17 +114,20 @@ impl LogSourceService {
             .filter_map(|maybe_path| maybe_path)
             .map(|path: String| Ok(path));
 
-
         let result: Result<Vec<String>, ApplicationError> = files_iter.collect();
 
         if let Ok(mut vec) = result {
             let now = SystemTime::now();
 
             vec.sort_by(|entry_a, entry_b| {
-                let modtime_a = fs::metadata(&entry_a).map(|meta| meta.modified())
-                    .map(|maybe_time| maybe_time.unwrap_or_else(|_| now)).unwrap_or_else(|_| now);
-                let modtime_b = fs::metadata(&entry_b).map(|meta| meta.modified())
-                    .map(|maybe_time| maybe_time.unwrap_or_else(|_| now)).unwrap_or_else(|_| now);
+                let modtime_a = fs::metadata(&entry_a)
+                    .map(|meta| meta.modified())
+                    .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
+                    .unwrap_or_else(|_| now);
+                let modtime_b = fs::metadata(&entry_b)
+                    .map(|meta| meta.modified())
+                    .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
+                    .unwrap_or_else(|_| now);
                 modtime_a.cmp(&modtime_b)
             });
             Ok(vec)
@@ -129,23 +143,31 @@ impl actix::Handler<LogSourceServiceMessage> for LogSourceService {
     fn handle(&mut self, msg: LogSourceServiceMessage, _ctx: &mut Self::Context) -> Self::Result {
         match msg {
             LogSourceServiceMessage::StreamSourceContent(id) => {
-                self.state.lookup_source(id.as_ref())
-                    .and_then(|maybe_src| {
-                        match maybe_src {
-                            Some(LogSource::File { id: _, file_pattern, line_pattern: _ }) => {
-                                let result = LogSourceService::resolve_files(&file_pattern);
-                                match result {
-                                    Ok(files) =>
-                                        files.iter().map(|file| self.stream_file(file)).collect(),
-                                    Err(_e) => Err(ApplicationError::FailedToReadSource)
-                                }
-                            }
-                            Some(LogSource::Journal { id: _, unit: _, line_pattern: _ }) => {
-                                unimplemented!()
-                            }
-                            None => Err(ApplicationError::SourceNotFound)
+                let lookup = self.state.lookup_source(id.as_ref());
+                lookup.and_then(|maybe_src| match maybe_src {
+                    Some(LogSource::File {
+                        id: _,
+                        file_pattern,
+                        line_pattern: _,
+                        grok_pattern,
+                    }) => {
+                        let result = LogSourceService::resolve_files(&file_pattern);
+                        match result {
+                            Ok(files) => files
+                                .iter()
+                                .map(|file| self.stream_file(file, grok_pattern.clone()))
+                                .collect(),
+                            Err(_e) => Err(ApplicationError::FailedToReadSource),
                         }
-                    })
+                    }
+                    Some(LogSource::Journal {
+                        id: _,
+                        unit: _,
+                        line_pattern: _,
+                        grok_pattern: _,
+                    }) => unimplemented!(),
+                    None => Err(ApplicationError::SourceNotFound),
+                })
             }
         }
     }

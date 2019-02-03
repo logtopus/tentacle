@@ -4,8 +4,8 @@ sources:
   - id: test-log
     type: log
     file_pattern: demo\.log(\.\d(\.gz)?)?
-    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{DATA:message}"
+    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{GREEDYDATA:msg}"
   - id: test-journal
     type: journal
     unit: demo
-    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{DATA:message}"
+    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} Message: %{GREEDYDATA:message}"

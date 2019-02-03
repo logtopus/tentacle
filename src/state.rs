@@ -7,6 +7,7 @@ use futures::Future;
 use crate::logsource::LogSource;
 use std::sync::Mutex;
 use tokio::runtime::Runtime;
+use grok::Grok;
 
 type LogSources = Arc<RwLock<Vec<LogSource>>>;
 
@@ -27,6 +28,7 @@ pub enum ApplicationError {
 pub struct ServerState {
     sources: LogSources,
     blk_rt: Arc<Mutex<Runtime>>,
+    pub grok: Arc<Grok>,
 }
 
 impl Clone for ServerState {
@@ -34,6 +36,7 @@ impl Clone for ServerState {
         ServerState {
             sources: self.sources.clone(),
             blk_rt: self.blk_rt.clone(),
+            grok: self.grok.clone(),
         }
     }
 }
@@ -43,6 +46,7 @@ impl ServerState {
         ServerState {
             sources: Arc::new(RwLock::new(vec![])),
             blk_rt: Arc::new(Mutex::new(Runtime::new().unwrap())),
+            grok: Arc::new(Grok::default()),
         }
     }
 
@@ -67,8 +71,8 @@ impl ServerState {
 
     fn extract_source_key(source: &LogSource) -> &String {
         match source {
-            LogSource::File { id, file_pattern: _, line_pattern: _ } => id,
-            LogSource::Journal { id, unit: _, line_pattern: _ } => id
+            LogSource::File { id, file_pattern: _, line_pattern: _, grok_pattern: _ } => id,
+            LogSource::Journal { id, unit: _, line_pattern: _, grok_pattern: _ } => id
         }
     }
 

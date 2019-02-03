@@ -15,6 +15,7 @@ clap = "2.32" # parse command line options
 config = "0.9" # parse config file
 log = "0.4" # logging facade
 env_logger = "0.6" # log implementation
+grok = "0.5" # log parsing
 failure = "0.1"
 futures = "0.1"
 http = "0.1"
