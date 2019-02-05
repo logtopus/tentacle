@@ -182,10 +182,21 @@ impl actix::Actor for LogSourceService {
 #[cfg(test)]
 mod tests {
     use crate::logsource_svc::LogSourceService;
+    use filetime::set_file_times;
+    use filetime::FileTime;
     use regex::Regex;
+    use std::fs;
+    use std::path::Path;
 
     #[test]
     fn test_resolve_files() {
+        // Setting reliable modification time on files
+        let demo_1 = Path::new("tests/demo.log.1");
+        let metadata = fs::metadata(demo_1).unwrap();
+        let real_time = FileTime::from_last_modification_time(&metadata);
+        let test_time = FileTime::from_unix_time(real_time.seconds() - 86400, 0);
+        set_file_times(demo_1, test_time, test_time).unwrap();
+
         let regex = Regex::new(r#"tests/demo\.log(\.\d(\.gz)?)?"#).unwrap();
         let result = LogSourceService::resolve_files(&regex).unwrap();
         assert_eq!(result.len(), 2);
