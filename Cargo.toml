@@ -10,6 +10,7 @@ license = "Apache-2.0"
 [dependencies]
 actix = "0.7" # actor framework
 actix-web = "0.7" # web serving
+actix-web-httpauth = "0.1.0" # token extractors
 bytes = "0.4"
 clap = "2.32" # parse command line options
 config = "0.9" # parse config file

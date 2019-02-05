@@ -7,6 +7,7 @@ use bytes::Bytes;
 use futures;
 use futures::Future;
 use futures::Stream;
+use actix_web_httpauth::extractors::bearer::BearerAuth;
 
 use crate::logsource::LogSource;
 use crate::logsource::LogSourceType;
@@ -63,8 +64,6 @@ pub fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
 }
 
 fn get_source_content(id: actix_web::Path<String>, state: actix_web::State<ServerState>, as_json: bool) -> actix_web::FutureResponse<HttpResponse> {
-    debug!("Content for source {} requested", id);
-
     let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
     let logsourcesvc = LogSourceService::new(state.clone(), tx).start();
     let request = logsourcesvc.send(LogSourceServiceMessage::StreamSourceContent(id.to_string()));
@@ -127,12 +126,18 @@ fn parse_line(stream_entry: &StreamEntry) -> ParsedLine {
     }
 }
 
-pub fn get_source_content_text(id: actix_web::Path<String>, state: actix_web::State<ServerState>) -> actix_web::FutureResponse<HttpResponse> {
+pub fn get_source_content_text(token: BearerAuth, id: actix_web::Path<String>, state: actix_web::State<ServerState>) -> actix_web::FutureResponse<HttpResponse> {
+    dbg!(token);
+    debug!("Content for source {} requested as plain text", id);
+
     get_source_content(id, state, false)
 }
 
 
-pub fn get_source_content_json(id: actix_web::Path<String>, state: actix_web::State<ServerState>) -> actix_web::FutureResponse<HttpResponse> {
+pub fn get_source_content_json(token: BearerAuth, id: actix_web::Path<String>, state: actix_web::State<ServerState>) -> actix_web::FutureResponse<HttpResponse> {
+    dbg!(token);
+    debug!("Content for source {} requested as json", id);
+
     get_source_content(id, state, true)
 }
 
