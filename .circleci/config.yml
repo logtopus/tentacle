@@ -3,46 +3,19 @@ version: 2
 jobs:
   build:
     docker:
-      # The image used to build our project, build
-      # your own using the Dockerfile provided below
-      # and replace here. I put my own image here for
-      # the example.
       - image: circleci/rust:latest
-
-    # environment:
-    #   # Set your codecov token if your repository is private.
-    #   CODECOV_TOKEN: <your-token>
-    #   TZ: "/usr/share/zoneinfo/Europe/Paris"
-
     steps:
       - checkout
       - restore_cache:
           key: tentacle-cache-v1
-      # - run:
-      #     name: Check formatting
-      #     command: |
-      #       rustfmt --version
-      #       cargo fmt -- --write-mode=diff
-      # - run:
-      #     name: Nightly Build
-      #     command: |
-      #       rustup run nightly rustc --version --verbose
-      #       rustup run nightly cargo --version --verbose
-      #       rustup run nightly cargo build
-      # - run:
-      #     name: Stable Build
-      #     command: cargo build
       - run:
           name: Test
-          command: cargo test
+          command: cargo test --release
       - run:
           name: Build
           command: cargo build --release
       - store_artifacts:
           path: target/release/tentacle
-      # - run:
-      #     name: Upload Coverage
-      #     command: ./scripts/codecov.sh
       - save_cache:
           key: tentacle-cache-v1
           paths:
