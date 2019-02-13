@@ -16,6 +16,7 @@ use std::fs::DirEntry;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::SystemTime;
+use std::cmp::Ordering;
 
 #[derive(Debug)]
 pub enum LogSourceServiceMessage {
@@ -94,46 +95,53 @@ impl LogSourceService {
                 ApplicationError::FailedToReadSource
             })?
             .filter_map(Result::ok)
-            .map(|entry: DirEntry| {
+            .flat_map(|entry: DirEntry| {
                 trace!("Found entry {:?}", entry);
-                entry
+                let t = entry
                     .path()
                     .to_str()
-                    .filter(|path| file_pattern.is_match(path))
-                    .filter(|path| {
-                        debug!("matching file: {}", path);
-                        if path.ends_with(".gz") {
-                            warn!("Currently skipping gz files");
-                            false
+                    .map(|path| {
+                        let maybe_matches = file_pattern.captures(path);
+                        if let Some(captures) = maybe_matches {
+                            debug!("matching file: {}", path);
+                            if path.ends_with(".gz") {
+                                warn!("Currently skipping gz files");
+                                None
+                            } else {
+                                let rotation_idx = captures.name("rotation")
+                                    .map(|e| e.as_str().parse::<i32>())
+                                    .and_then(|r| r.ok());
+                                Some((path.to_string(), rotation_idx.unwrap_or(0)))
+                            }
                         } else {
-                            true
+                            None
                         }
                     })
-                    .map(|p| p.to_string())
-            })
-            .filter_map(|maybe_path| maybe_path)
-            .map(|path: String| Ok(path));
-
-        let result: Result<Vec<String>, ApplicationError> = files_iter.collect();
-
-        if let Ok(mut vec) = result {
-            let now = SystemTime::now();
-
-            vec.sort_by(|entry_a, entry_b| {
-                let modtime_a = fs::metadata(&entry_a)
-                    .map(|meta| meta.modified())
-                    .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
-                    .unwrap_or_else(|_| now);
-                let modtime_b = fs::metadata(&entry_b)
-                    .map(|meta| meta.modified())
-                    .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
-                    .unwrap_or_else(|_| now);
-                modtime_a.cmp(&modtime_b)
+                    .and_then(|t| t);
+                t
             });
-            Ok(vec)
-        } else {
-            result
-        }
+
+        let mut vec: Vec<(String, i32)> = files_iter.collect();
+
+        let now = SystemTime::now();
+
+        vec.sort_by(|(path_a, idx_a), (path_b, idx_b)| {
+            match idx_b.cmp(idx_a) {
+                Ordering::Equal => {
+                    let modtime_a = fs::metadata(&path_a)
+                        .map(|meta| meta.modified())
+                        .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
+                        .unwrap_or_else(|_| now);
+                    let modtime_b = fs::metadata(&path_b)
+                        .map(|meta| meta.modified())
+                        .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
+                        .unwrap_or_else(|_| now);
+                    modtime_a.cmp(&modtime_b)
+                }
+                ord => ord
+            }
+        });
+        Ok(vec.into_iter().map(|(p,_)| p).collect())
     }
 }
 
@@ -182,22 +190,18 @@ impl actix::Actor for LogSourceService {
 #[cfg(test)]
 mod tests {
     use crate::logsource_svc::LogSourceService;
-    use filetime::set_file_times;
-    use filetime::FileTime;
     use regex::Regex;
-    use std::fs;
-    use std::path::Path;
 
     #[test]
     fn test_resolve_files() {
-        // Setting reliable modification time on files
-        let demo_1 = Path::new("tests/demo.log.1");
-        let metadata = fs::metadata(demo_1).unwrap();
-        let real_time = FileTime::from_last_modification_time(&metadata);
-        let test_time = FileTime::from_unix_time(real_time.seconds() - 86400, 0);
-        set_file_times(demo_1, test_time, test_time).unwrap();
+        // // Setting reliable modification time on files
+        // let demo_1 = Path::new("tests/demo.log.1");
+        // let metadata = fs::metadata(demo_1).unwrap();
+        // let real_time = FileTime::from_last_modification_time(&metadata);
+        // let test_time = FileTime::from_unix_time(real_time.seconds() - 86400, 0);
+        // set_file_times(demo_1, test_time, test_time).unwrap();
 
-        let regex = Regex::new(r#"tests/demo\.log(\.\d(\.gz)?)?"#).unwrap();
+        let regex = Regex::new(r#"tests/demo\.log(\.(?P<rotation>\d)(\.gz)?)?"#).unwrap();
         let result = LogSourceService::resolve_files(&regex).unwrap();
         assert_eq!(result.len(), 2);
         assert_eq!(result.get(0), Some(&"tests/demo.log.1".to_string()));
