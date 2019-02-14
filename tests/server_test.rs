@@ -14,7 +14,7 @@ fn itest_health_api() {
     support::run_test(setup, || {
         fn request() -> impl futures::Future<Item=(), Error=support::TestError> {
 
-            let health_api_request = actix_web::client::ClientRequest::get("http://localhost:8080/api/v1/health")
+            let health_api_request = actix_web::client::ClientRequest::get("http://localhost:18080/api/v1/health")
                 .header("User-Agent", "Actix-web")
                 .timeout(std::time::Duration::from_millis(1000))
                 .finish().unwrap();
