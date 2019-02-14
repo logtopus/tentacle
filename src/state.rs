@@ -13,12 +13,16 @@ type LogSources = Arc<RwLock<Vec<LogSource>>>;
 
 #[derive(Fail, Debug)]
 pub enum ApplicationError {
+    // indicates that a requested log source is not configured
     #[fail(display = "Source not found")]
-    SourceNotFound,
+    SourceNotFound, 
+    // indicates that new log source is already configured
     #[fail(display = "Source already exists")]
     SourceAlreadyAdded,
+    // indicates that a requested log source is not configured
     #[fail(display = "Failed to store source")]
-    FailedToWriteSource,
+    FailedToAddSource,
+    // indicates that a requested log source is configured but cannot be read
     #[fail(display = "Failed to read source")]
     FailedToReadSource,
 //    #[fail(display = "Missing attribute: {}", attr)]
@@ -59,7 +63,7 @@ impl ServerState {
 
     pub fn add_source(&mut self, source: LogSource) -> Result<(), ApplicationError> {
         let key = Self::extract_source_key(&source);
-        let mut locked_vec = self.sources.write().map_err(|_| ApplicationError::FailedToWriteSource)?;
+        let mut locked_vec = self.sources.write().map_err(|_| ApplicationError::FailedToAddSource)?;
 
         if locked_vec.iter().find(|src| Self::extract_source_key(src) == key).is_some() {
             Err(ApplicationError::SourceAlreadyAdded)

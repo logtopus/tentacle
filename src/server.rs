@@ -29,7 +29,7 @@ impl ResponseError for state::ApplicationError {
                     .header(http::header::CONTENT_TYPE, "application/json")
                     .json(ErrorResponse { message: self.to_string() })
             }
-            state::ApplicationError::FailedToWriteSource => {
+            state::ApplicationError::FailedToAddSource => {
                 HttpResponse::InternalServerError()
                     .header(http::header::CONTENT_TYPE, "application/json")
                     .json(ErrorResponse { message: self.to_string() })
