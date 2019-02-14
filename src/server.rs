@@ -87,8 +87,10 @@ pub fn start_server(settings: &config::Config) {
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .resource("/sources/{id}/content", |r| {
-                    r.get().filter(actix_web::pred::Header("Accept", "application/json")).with(logsource_port::get_source_content_json);
+                    r.get().filter(actix_web::pred::Header("Accept", "*/*")).with(logsource_port::get_source_content_text);
                     r.get().filter(actix_web::pred::Header("Accept", "text/plain")).with(logsource_port::get_source_content_text);
+                    r.get().filter(actix_web::pred::Header("Accept", "application/json")).with(logsource_port::get_source_content_json);
+                    r.get().f(|_| HttpResponse::NotAcceptable());
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .boxed(),
