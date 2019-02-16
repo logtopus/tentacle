@@ -136,6 +136,26 @@ pub fn get_source_content_json(id: actix_web::Path<String>, state: actix_web::St
     get_source_content(id, state, true)
 }
 
-//#[cfg(test)]
-//mod tests {
-//}
+#[cfg(test)]
+mod tests {
+    use crate::logsource_svc::StreamEntry;
+    use grok;
+    use std::sync::Arc;
+
+    #[test]
+    fn test_parse_line_with_timestamp() {
+        let mut grok = grok::Grok::default();
+
+        let pattern = Arc::new(grok.compile("%{TIMESTAMP_ISO8601:timestamp} %{GREEDYDATA:message}", true).unwrap());
+        let line = "2018-01-01 12:39:01 first message".to_string();
+        let parsed_line = super::parse_line(&StreamEntry { line, pattern });
+        assert_eq!("2018-01-01 12:39:01", parsed_line.timestamp);
+        assert_eq!("first message", parsed_line.message);
+
+        let pattern = Arc::new(grok.compile("%{SYSLOGTIMESTAMP:timestamp} %{GREEDYDATA:message}", true).unwrap());
+        let line = "Feb 10 13:17:01 second message".to_string();
+        let parsed_line = super::parse_line(&StreamEntry { line, pattern });
+        assert_eq!("Feb 10 13:17:01", parsed_line.timestamp);
+        assert_eq!("second message", parsed_line.message);
+    }
+}
