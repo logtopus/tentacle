@@ -44,16 +44,23 @@ impl LogSource {
         let maybe_matches = line_pattern.grok.match_against(&line);
 
         if let Some(matches) = maybe_matches {
+            let timestamp = matches
+                .get("timestamp")
+                .map(|ts| {
+                    chrono::NaiveDateTime::parse_from_str(&ts, &line_pattern.chrono)
+                        .map(|dt| dt.timestamp())
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0)
+                .to_string();
+
             ParsedLine {
-                timestamp: matches
-                    .get("timestamp")
-                    .unwrap_or("1970-01-01T00:00+00:00")
-                    .to_string(),
+                timestamp,
                 message: matches.get("message").unwrap_or("").to_string(),
             }
         } else {
             ParsedLine {
-                timestamp: "1970-01-01T00:00+00:00".to_string(),
+                timestamp: "0".to_string(),
                 message: "<failed to parse entry>".to_string(),
             }
         }
@@ -162,8 +169,8 @@ impl LogSource {
 
 #[cfg(test)]
 mod tests {
-    use crate::logsource::LogSource;
     use crate::logsource::LinePattern;
+    use crate::logsource::LogSource;
     use grok::Grok;
     use std::sync::Arc;
 
@@ -194,7 +201,8 @@ mod tests {
                 );
                 assert_eq!(line_pattern.chrono.as_ref(), "%b %d %H:%M:%S");
 
-                let matches = line_pattern.grok
+                let matches = line_pattern
+                    .grok
                     .match_against("2007-08-31T16:47+00:00 Some message")
                     .unwrap();
                 assert_eq!(matches.get("timestamp"), Some("2007-08-31T16:47+00:00"));
@@ -217,7 +225,8 @@ mod tests {
                 );
                 assert_eq!(line_pattern.chrono.as_ref(), "%b %d %H:%M:%S");
 
-                let matches = line_pattern.grok
+                let matches = line_pattern
+                    .grok
                     .match_against("2007-08-31T16:47+00:00 Message: Some message")
                     .expect("No matches found");
                 assert_eq!(matches.get("timestamp"), Some("2007-08-31T16:47+00:00"));
@@ -234,11 +243,15 @@ mod tests {
         let raw = "%{TIMESTAMP_ISO8601:timestamp} %{GREEDYDATA:message}";
         let grok = Arc::new(grok_default.compile(raw, true).unwrap());
         let chrono = Arc::new("%Y-%m-%d %H:%M:%S".to_string());
-        let line_pattern = LinePattern { raw: raw.to_string(), grok, chrono: chrono.clone() };
+        let line_pattern = LinePattern {
+            raw: raw.to_string(),
+            grok,
+            chrono: chrono.clone(),
+        };
 
         let line = "2018-01-01 12:39:01 first message".to_string();
         let parsed_line = LogSource::apply_pattern(line, &line_pattern);
-        assert_eq!("2018-01-01 12:39:01", parsed_line.timestamp);
+        assert_eq!("1514810341", parsed_line.timestamp);
         assert_eq!("first message", parsed_line.message);
 
         let grok = Arc::new(
@@ -246,11 +259,15 @@ mod tests {
                 .compile("%{SYSLOGTIMESTAMP:timestamp} %{GREEDYDATA:message}", true)
                 .unwrap(),
         );
-        let line_pattern = LinePattern { raw: raw.to_string(), grok, chrono: chrono.clone() };
+        let line_pattern = LinePattern {
+            raw: raw.to_string(),
+            grok,
+            chrono: chrono.clone(),
+        };
 
         let line = "Feb 10 13:17:01 second message".to_string();
         let parsed_line = LogSource::apply_pattern(line, &line_pattern);
-        assert_eq!("Feb 10 13:17:01", parsed_line.timestamp);
+        assert_eq!("0", parsed_line.timestamp);
         assert_eq!("second message", parsed_line.message);
     }
 }
