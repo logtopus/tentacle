@@ -98,13 +98,18 @@ fn get_source_content(
                 .map(|_| match state.lookup_source(id.as_ref()) {
                     Ok(Some(src)) => HttpResponse::Ok()
                         .content_encoding(actix_web::http::ContentEncoding::Identity)
-                        .content_type("text/plain")
+                        .content_type(if as_json {
+                            "application/json"
+                        } else {
+                            "text/plain"
+                        })
                         .streaming(
                             rx_body
                                 .map_err(|_| actix_web::error::PayloadError::Incomplete)
                                 .map(move |stream_entry| {
                                     if as_json {
-                                        match serde_json::to_vec(&src.parse_line(stream_entry.line)) {
+                                        match serde_json::to_vec(&src.parse_line(stream_entry.line))
+                                        {
                                             Ok(vec) => Bytes::from(vec),
                                             Err(e) => {
                                                 error!(
@@ -120,12 +125,11 @@ fn get_source_content(
                                 }),
                         ),
                     Ok(None) => ApplicationError::SourceNotFound.error_response(),
-                    Err(e) => e.error_response()
+                    Err(e) => e.error_response(),
                 })
         })
         .responder()
 }
-
 
 pub fn get_source_content_text(
     id: actix_web::Path<String>,
