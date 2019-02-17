@@ -5,6 +5,7 @@ use actix_web::error::ResponseError;
 use actix_web::AsyncResponder;
 use actix_web::HttpResponse;
 use bytes::Bytes;
+use bytes::BufMut;
 use futures;
 use futures::Future;
 use futures::Stream;
@@ -110,7 +111,10 @@ fn get_source_content(
                                     if as_json {
                                         match serde_json::to_vec(&src.parse_line(stream_entry.line))
                                         {
-                                            Ok(vec) => Bytes::from(vec),
+                                            Ok(mut vec) => {
+                                                vec.put_u8('\n' as u8);
+                                                Bytes::from(vec)
+                                            }
                                             Err(e) => {
                                                 error!(
                                                     "Failed to convert stream entry to json: {}",
