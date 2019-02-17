@@ -4,11 +4,14 @@ sources:
     type: log
     file_pattern: /var/log/auth\.log(\.(?P<rotation>\d)(\.gz)?)?
     line_pattern: "%{SYSLOGTIMESTAMP:timestamp} %{GREEDYDATA:message}"
+    datetime_pattern: "%b %d %H:%M:%S"
   - id: system-syslog
     type: log
     file_pattern: /var/log/syslog(\.\d(\.gz)?)?
     line_pattern: "%{SYSLOGTIMESTAMP:timestamp} %{GREEDYDATA:message}"
+    datetime_pattern: "%b %d %H:%M:%S"
   - id: system-sshd
     type: journal
     unit: sshd
     line_pattern: "%{SYSLOGTIMESTAMP:timestamp} %{GREEDYDATA:message}"
+    datetime_pattern: "%b %d %H:%M:%S"

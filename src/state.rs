@@ -5,9 +5,9 @@ use failure::Fail;
 use futures::Future;
 
 use crate::logsource::LogSource;
+use grok::Grok;
 use std::sync::Mutex;
 use tokio::runtime::Runtime;
-use grok::Grok;
 
 type LogSources = Arc<RwLock<Vec<LogSource>>>;
 
@@ -15,7 +15,7 @@ type LogSources = Arc<RwLock<Vec<LogSource>>>;
 pub enum ApplicationError {
     // indicates that a requested log source is not configured
     #[fail(display = "Source not found")]
-    SourceNotFound, 
+    SourceNotFound,
     // indicates that new log source is already configured
     #[fail(display = "Source already exists")]
     SourceAlreadyAdded,
@@ -25,8 +25,8 @@ pub enum ApplicationError {
     // indicates that a requested log source is configured but cannot be read
     #[fail(display = "Failed to read source")]
     FailedToReadSource,
-//    #[fail(display = "Missing attribute: {}", attr)]
-//    MissingAttribute { attr: String },
+    //    #[fail(display = "Missing attribute: {}", attr)]
+    //    MissingAttribute { attr: String },
 }
 
 pub struct ServerState {
@@ -54,18 +54,25 @@ impl ServerState {
         }
     }
 
-    pub fn run_blocking(&self, future: impl Future<Item=(), Error=()> + Send + 'static) {
+    pub fn run_blocking(&self, future: impl Future<Item = (), Error = ()> + Send + 'static) {
         match self.blk_rt.lock().as_mut().map(|r| r.spawn(future)) {
             Ok(_) => (),
-            Err(e) => error!("{}", e)
+            Err(e) => error!("{}", e),
         }
     }
 
     pub fn add_source(&mut self, source: LogSource) -> Result<(), ApplicationError> {
         let key = Self::extract_source_key(&source);
-        let mut locked_vec = self.sources.write().map_err(|_| ApplicationError::FailedToAddSource)?;
+        let mut locked_vec = self
+            .sources
+            .write()
+            .map_err(|_| ApplicationError::FailedToAddSource)?;
 
-        if locked_vec.iter().find(|src| Self::extract_source_key(src) == key).is_some() {
+        if locked_vec
+            .iter()
+            .find(|src| Self::extract_source_key(src) == key)
+            .is_some()
+        {
             Err(ApplicationError::SourceAlreadyAdded)
         } else {
             locked_vec.push(source);
@@ -75,8 +82,16 @@ impl ServerState {
 
     fn extract_source_key(source: &LogSource) -> &String {
         match source {
-            LogSource::File { id, file_pattern: _, line_pattern: _, grok_pattern: _ } => id,
-            LogSource::Journal { id, unit: _, line_pattern: _, grok_pattern: _ } => id
+            LogSource::File {
+                id,
+                file_pattern: _,
+                line_pattern: _,
+            } => id,
+            LogSource::Journal {
+                id,
+                unit: _,
+                line_pattern: _,
+            } => id,
         }
     }
 
@@ -86,7 +101,9 @@ impl ServerState {
 
     pub fn lookup_source(&self, key: &str) -> Result<Option<LogSource>, ApplicationError> {
         let locked_vec = self.sources.read().unwrap();
-        let maybe_src = locked_vec.iter().find(|src| Self::extract_source_key(src) == key);
+        let maybe_src = locked_vec
+            .iter()
+            .find(|src| Self::extract_source_key(src) == key);
         Ok(maybe_src.map(|s| (*s).clone()))
     }
 }

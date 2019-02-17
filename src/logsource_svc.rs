@@ -11,12 +11,11 @@ use crate::logsource::LogSource;
 use crate::state;
 use crate::state::ApplicationError;
 use regex::Regex;
+use std::cmp::Ordering;
 use std::fs::read_dir;
 use std::fs::DirEntry;
 use std::path::Path;
-use std::sync::Arc;
 use std::time::SystemTime;
-use std::cmp::Ordering;
 
 #[derive(Debug)]
 pub enum LogSourceServiceMessage {
@@ -29,7 +28,6 @@ impl actix::Message for LogSourceServiceMessage {
 
 pub struct StreamEntry {
     pub line: String,
-    pub pattern: Arc<grok::Pattern>,
 }
 
 pub struct LogSourceService {
@@ -45,11 +43,7 @@ impl LogSourceService {
         LogSourceService { state, tx }
     }
 
-    fn stream_file(
-        &mut self,
-        path: &str,
-        pattern: Arc<grok::Pattern>,
-    ) -> Result<(), ApplicationError> {
+    fn stream_file(&mut self, path: &str) -> Result<(), ApplicationError> {
         let metadata = fs::metadata(&path).map_err(|_| ApplicationError::FailedToReadSource)?;
 
         match metadata.is_dir() {
@@ -65,10 +59,7 @@ impl LogSourceService {
                             tokio::codec::FramedRead::new(tokio_file, LogCodec::new(2048));
                         let tx = self.tx.clone();
                         let future = linereader
-                            .map(move |s| StreamEntry {
-                                line: s,
-                                pattern: pattern.clone(),
-                            })
+                            .map(move |s| StreamEntry { line: s })
                             .forward(tx.sink_map_err(|e| {
                                 io::Error::new(io::ErrorKind::Other, e.to_string())
                             }))
@@ -108,7 +99,8 @@ impl LogSourceService {
                                 warn!("Currently skipping gz files");
                                 None
                             } else {
-                                let rotation_idx = captures.name("rotation")
+                                let rotation_idx = captures
+                                    .name("rotation")
                                     .map(|e| e.as_str().parse::<i32>())
                                     .and_then(|r| r.ok());
                                 Some((path.to_string(), rotation_idx.unwrap_or(0)))
@@ -125,23 +117,21 @@ impl LogSourceService {
 
         let now = SystemTime::now();
 
-        vec.sort_by(|(path_a, idx_a), (path_b, idx_b)| {
-            match idx_b.cmp(idx_a) {
-                Ordering::Equal => {
-                    let modtime_a = fs::metadata(&path_a)
-                        .map(|meta| meta.modified())
-                        .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
-                        .unwrap_or_else(|_| now);
-                    let modtime_b = fs::metadata(&path_b)
-                        .map(|meta| meta.modified())
-                        .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
-                        .unwrap_or_else(|_| now);
-                    modtime_a.cmp(&modtime_b)
-                }
-                ord => ord
+        vec.sort_by(|(path_a, idx_a), (path_b, idx_b)| match idx_b.cmp(idx_a) {
+            Ordering::Equal => {
+                let modtime_a = fs::metadata(&path_a)
+                    .map(|meta| meta.modified())
+                    .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
+                    .unwrap_or_else(|_| now);
+                let modtime_b = fs::metadata(&path_b)
+                    .map(|meta| meta.modified())
+                    .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
+                    .unwrap_or_else(|_| now);
+                modtime_a.cmp(&modtime_b)
             }
+            ord => ord,
         });
-        Ok(vec.into_iter().map(|(p,_)| p).collect())
+        Ok(vec.into_iter().map(|(p, _)| p).collect())
     }
 }
 
@@ -157,14 +147,10 @@ impl actix::Handler<LogSourceServiceMessage> for LogSourceService {
                         id: _,
                         file_pattern,
                         line_pattern: _,
-                        grok_pattern,
                     }) => {
                         let result = LogSourceService::resolve_files(&file_pattern);
                         match result {
-                            Ok(files) => files
-                                .iter()
-                                .map(|file| self.stream_file(file, grok_pattern.clone()))
-                                .collect(),
+                            Ok(files) => files.iter().map(|file| self.stream_file(file)).collect(),
                             Err(_e) => Err(ApplicationError::FailedToReadSource),
                         }
                     }
@@ -172,7 +158,6 @@ impl actix::Handler<LogSourceServiceMessage> for LogSourceService {
                         id: _,
                         unit: _,
                         line_pattern: _,
-                        grok_pattern: _,
                     }) => unimplemented!(),
                     None => Err(ApplicationError::SourceNotFound),
                 })
