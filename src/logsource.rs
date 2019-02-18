@@ -21,7 +21,7 @@ pub struct LinePattern {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ParsedLine {
-    timestamp: String,
+    timestamp: i64,
     message: String,
 }
 
@@ -51,8 +51,7 @@ impl LogSource {
                         .map(|dt| dt.timestamp())
                         .unwrap_or(0)
                 })
-                .unwrap_or(0)
-                .to_string();
+                .unwrap_or(0);
 
             ParsedLine {
                 timestamp,
@@ -60,7 +59,7 @@ impl LogSource {
             }
         } else {
             ParsedLine {
-                timestamp: "0".to_string(),
+                timestamp: 0,
                 message: "<failed to parse entry>".to_string(),
             }
         }
@@ -251,7 +250,7 @@ mod tests {
 
         let line = "2018-01-01 12:39:01 first message".to_string();
         let parsed_line = LogSource::apply_pattern(line, &line_pattern);
-        assert_eq!("1514810341", parsed_line.timestamp);
+        assert_eq!(1514810341, parsed_line.timestamp);
         assert_eq!("first message", parsed_line.message);
 
         let grok = Arc::new(
@@ -267,7 +266,7 @@ mod tests {
 
         let line = "Feb 10 13:17:01 second message".to_string();
         let parsed_line = LogSource::apply_pattern(line, &line_pattern);
-        assert_eq!("0", parsed_line.timestamp);
+        assert_eq!(0, parsed_line.timestamp);
         assert_eq!("second message", parsed_line.message);
     }
 }
