@@ -48,11 +48,10 @@ impl LogSource {
                 .get("timestamp")
                 .map(|ts| {
                     chrono::NaiveDateTime::parse_from_str(&ts, &line_pattern.chrono)
-                        .map(|dt| dt.timestamp())
+                        .map(|dt| dt.timestamp() * 1000 + (dt.timestamp_subsec_millis() as i64))
                         .unwrap_or(0)
                 })
                 .unwrap_or(0);
-
             ParsedLine {
                 timestamp,
                 message: matches.get("message").unwrap_or("").to_string(),
@@ -250,7 +249,7 @@ mod tests {
 
         let line = "2018-01-01 12:39:01 first message".to_string();
         let parsed_line = LogSource::apply_pattern(line, &line_pattern);
-        assert_eq!(1514810341, parsed_line.timestamp);
+        assert_eq!(1514810341000, parsed_line.timestamp);
         assert_eq!("first message", parsed_line.message);
 
         let grok = Arc::new(
