@@ -4,8 +4,8 @@ use actix_web;
 use actix_web::error::ResponseError;
 use actix_web::AsyncResponder;
 use actix_web::HttpResponse;
-use bytes::Bytes;
 use bytes::BufMut;
+use bytes::Bytes;
 use futures;
 use futures::Future;
 use futures::Stream;
@@ -59,18 +59,12 @@ impl From<&LogSource> for LogSourceRepr {
 }
 
 pub fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
-    let sources = state.get_sources();
-    let lock = sources.read();
-    match lock {
-        Ok(locked_vec) => {
-            let dto: Vec<LogSourceRepr> = locked_vec
-                .iter()
-                .map(|src| LogSourceRepr::from(src))
-                .collect();
-            HttpResponse::Ok().json(dto)
-        }
-        Err(_) => HttpResponse::InternalServerError().finish(),
-    }
+    let dto: Vec<LogSourceRepr> = state
+        .get_sources()
+        .iter()
+        .map(|src| LogSourceRepr::from(src))
+        .collect();
+    HttpResponse::Ok().json(dto)
 }
 
 fn get_source_content(

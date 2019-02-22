@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::sync::RwLock;
 
 use failure::Fail;
 use futures::Future;
@@ -9,19 +8,11 @@ use grok::Grok;
 use std::sync::Mutex;
 use tokio::runtime::Runtime;
 
-type LogSources = Arc<RwLock<Vec<LogSource>>>;
-
 #[derive(Fail, Debug)]
 pub enum ApplicationError {
     // indicates that a requested log source is not configured
     #[fail(display = "Source not found")]
     SourceNotFound,
-    // indicates that new log source is already configured
-    #[fail(display = "Source already exists")]
-    SourceAlreadyAdded,
-    // indicates that a requested log source is not configured
-    #[fail(display = "Failed to store source")]
-    FailedToAddSource,
     // indicates that a requested log source is configured but cannot be read
     #[fail(display = "Failed to read source")]
     FailedToReadSource,
@@ -30,7 +21,7 @@ pub enum ApplicationError {
 }
 
 pub struct ServerState {
-    sources: LogSources,
+    sources: Arc<Vec<LogSource>>,
     blk_rt: Arc<Mutex<Runtime>>,
     pub grok: Arc<Grok>,
 }
@@ -46,11 +37,11 @@ impl Clone for ServerState {
 }
 
 impl ServerState {
-    pub fn new() -> ServerState {
+    pub fn new(sources: Vec<LogSource>, grok: Grok) -> ServerState {
         ServerState {
-            sources: Arc::new(RwLock::new(vec![])),
+            sources: Arc::new(sources),
             blk_rt: Arc::new(Mutex::new(Runtime::new().unwrap())),
-            grok: Arc::new(Grok::default()),
+            grok: Arc::new(grok),
         }
     }
 
@@ -58,25 +49,6 @@ impl ServerState {
         match self.blk_rt.lock().as_mut().map(|r| r.spawn(future)) {
             Ok(_) => (),
             Err(e) => error!("{}", e),
-        }
-    }
-
-    pub fn add_source(&mut self, source: LogSource) -> Result<(), ApplicationError> {
-        let key = Self::extract_source_key(&source);
-        let mut locked_vec = self
-            .sources
-            .write()
-            .map_err(|_| ApplicationError::FailedToAddSource)?;
-
-        if locked_vec
-            .iter()
-            .find(|src| Self::extract_source_key(src) == key)
-            .is_some()
-        {
-            Err(ApplicationError::SourceAlreadyAdded)
-        } else {
-            locked_vec.push(source);
-            Ok(())
         }
     }
 
@@ -95,13 +67,13 @@ impl ServerState {
         }
     }
 
-    pub fn get_sources(&self) -> LogSources {
+    pub fn get_sources(&self) -> Arc<Vec<LogSource>> {
         self.sources.clone()
     }
 
     pub fn lookup_source(&self, key: &str) -> Result<Option<LogSource>, ApplicationError> {
-        let locked_vec = self.sources.read().unwrap();
-        let maybe_src = locked_vec
+        let maybe_src = self
+            .sources
             .iter()
             .find(|src| Self::extract_source_key(src) == key);
         Ok(maybe_src.map(|s| (*s).clone()))

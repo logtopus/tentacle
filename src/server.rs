@@ -1,14 +1,13 @@
 use std;
 
 use actix_web;
-use actix_web::Binary;
-use actix_web::Body;
 use actix_web::error::ResponseError;
 use actix_web::http;
+use actix_web::Binary;
+use actix_web::Body;
 use actix_web::HttpRequest;
 use actix_web::HttpResponse;
 use config;
-use std::sync::Arc;
 
 use crate::constants::*;
 use crate::logsource::LogSource;
@@ -19,49 +18,38 @@ use crate::state::ServerState;
 impl ResponseError for state::ApplicationError {
     fn error_response(&self) -> HttpResponse {
         match *self {
-            state::ApplicationError::SourceNotFound => {
-                HttpResponse::NotFound()
-                    .header(http::header::CONTENT_TYPE, "application/json")
-                    .json(ErrorResponse { message: self.to_string() })
-            }
-            state::ApplicationError::SourceAlreadyAdded => {
-                HttpResponse::BadRequest()
-                    .header(http::header::CONTENT_TYPE, "application/json")
-                    .json(ErrorResponse { message: self.to_string() })
-            }
-            state::ApplicationError::FailedToAddSource => {
-                HttpResponse::InternalServerError()
-                    .header(http::header::CONTENT_TYPE, "application/json")
-                    .json(ErrorResponse { message: self.to_string() })
-            }
-            state::ApplicationError::FailedToReadSource => {
-                HttpResponse::InternalServerError()
-                    .header(http::header::CONTENT_TYPE, "application/json")
-                    .json(ErrorResponse { message: self.to_string() })
-            }
-//            state::ApplicationError::MissingAttribute { attr: _ } => {
-//                HttpResponse::BadRequest()
-//                    .header(http::header::CONTENT_TYPE, "application/json")
-//                    .json(ErrorResponse { message: self.to_string() })
-//            }
+            state::ApplicationError::SourceNotFound => HttpResponse::NotFound()
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .json(ErrorResponse {
+                    message: self.to_string(),
+                }),
+            state::ApplicationError::FailedToReadSource => HttpResponse::InternalServerError()
+                .header(http::header::CONTENT_TYPE, "application/json")
+                .json(ErrorResponse {
+                    message: self.to_string(),
+                }),
         }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct ErrorResponse {
-    message: String
+    message: String,
 }
 
-fn parse_files(settings: &config::Config, server_state: &mut ServerState) {
+fn parse_source_config(settings: &config::Config, grok: &mut grok::Grok) -> Vec<LogSource> {
     if let Ok(array) = settings.get_array("sources") {
-        array.iter()
-            .for_each(|v| {
-                let grok = Arc::get_mut(&mut server_state.grok).unwrap();
-                let src = LogSource::try_from_config(v, grok).unwrap();
-                server_state.add_source(src).unwrap();
-            });
-    };
+        array
+            .iter()
+            .map(|v| {
+                // let grok = Arc::get_mut(&mut grok).unwrap();
+                LogSource::try_from_config(v, grok).unwrap()
+            })
+            .collect()
+    } else {
+        warn!("No log sources configured");
+        vec![]
+    }
 }
 
 pub fn start_server(settings: &config::Config) {
@@ -69,9 +57,9 @@ pub fn start_server(settings: &config::Config) {
     let ip = settings.get_str("http.bind.ip").unwrap();
     let addr: std::net::SocketAddr = format!("{}:{}", ip, port).parse().unwrap();
 
-    let mut server_state = ServerState::new();
+    let mut grok = grok::Grok::default();
 
-    parse_files(&settings, &mut server_state);
+    let server_state = ServerState::new(parse_source_config(&settings, &mut grok), grok);
 
     actix_web::server::new(move || {
         vec![
@@ -87,9 +75,15 @@ pub fn start_server(settings: &config::Config) {
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
                 .resource("/sources/{id}/content", |r| {
-                    r.get().filter(actix_web::pred::Header("Accept", "*/*")).with(logsource_port::get_source_content_text);
-                    r.get().filter(actix_web::pred::Header("Accept", "text/plain")).with(logsource_port::get_source_content_text);
-                    r.get().filter(actix_web::pred::Header("Accept", "application/json")).with(logsource_port::get_source_content_json);
+                    r.get()
+                        .filter(actix_web::pred::Header("Accept", "*/*"))
+                        .with(logsource_port::get_source_content_text);
+                    r.get()
+                        .filter(actix_web::pred::Header("Accept", "text/plain"))
+                        .with(logsource_port::get_source_content_text);
+                    r.get()
+                        .filter(actix_web::pred::Header("Accept", "application/json"))
+                        .with(logsource_port::get_source_content_json);
                     r.get().f(|_| HttpResponse::NotAcceptable());
                     r.head().f(|_| HttpResponse::MethodNotAllowed());
                 })
@@ -97,11 +91,12 @@ pub fn start_server(settings: &config::Config) {
             actix_web::App::new()
                 .middleware(actix_web::middleware::Logger::default())
                 .resource("/index.html", |r| r.f(index))
-                .boxed()
+                .boxed(),
         ]
     })
-        .bind(addr).expect(&format!("Failed to bind to {}:{}", ip, port))
-        .start();
+    .bind(addr)
+    .expect(&format!("Failed to bind to {}:{}", ip, port))
+    .start();
 
     println!("Started http server: {:?}", addr);
 }
@@ -119,12 +114,12 @@ mod tests {
     use std;
 
     use actix_web::http;
+    use actix_web::test::TestRequest;
     use actix_web::Body;
     use actix_web::FromRequest;
     use actix_web::State;
-    use actix_web::test::TestRequest;
 
-//    use crate::state;
+    //    use crate::state;
 
     #[test]
     fn test_index_handler() {
@@ -134,17 +129,18 @@ mod tests {
         assert_eq!(resp.status(), http::StatusCode::OK);
 
         match resp.body() {
-            Body::Binary(binary) => {
-                assert_eq!(std::str::from_utf8(binary.as_ref()).unwrap(), super::WELCOME_MSG)
-            }
-            t => assert!(false, format!("Wrong body type {:?}", t))
+            Body::Binary(binary) => assert_eq!(
+                std::str::from_utf8(binary.as_ref()).unwrap(),
+                super::WELCOME_MSG
+            ),
+            t => assert!(false, format!("Wrong body type {:?}", t)),
         }
     }
 
     #[test]
     fn test_health_handler() {
         actix::System::run(|| {
-            let state = super::ServerState::new();
+            let state = super::ServerState::new(vec![], grok::Grok::default());
             let req = TestRequest::with_state(state).finish();
             let resp = super::health(State::extract(&req));
             assert_eq!(resp.status(), http::StatusCode::OK);
