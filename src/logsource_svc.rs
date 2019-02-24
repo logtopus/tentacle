@@ -1,18 +1,17 @@
 use std::fs;
-use std::io;
+use std::io::BufRead;
+use std::io::BufReader;
 
-use actix;
-use futures::Future;
-use futures::Sink;
-use futures::Stream;
-
-use crate::logcodec::LogCodec;
 use crate::logsource::LogSource;
 use crate::state;
 use crate::state::ApplicationError;
+use actix;
 use chrono::Datelike;
 use chrono::NaiveDateTime;
 use flate2::read::GzDecoder;
+use futures::sync::mpsc::Sender;
+use futures::Async;
+use futures::Sink;
 use regex::Regex;
 use std::cmp::Ordering;
 use std::fs::read_dir;
@@ -32,6 +31,73 @@ impl actix::Message for LogSourceServiceMessage {
 pub struct StreamEntry {
     pub line: String,
     pub year: i32,
+}
+
+struct LogFile(pub String, pub Sender<StreamEntry>);
+
+impl actix::Message for LogFile {
+    type Result = Result<(), ApplicationError>;
+}
+
+pub struct LogFileStreamer;
+
+impl actix::Actor for LogFileStreamer {
+    type Context = actix::sync::SyncContext<Self>;
+}
+
+impl actix::Handler<LogFile> for LogFileStreamer {
+    type Result = Result<(), ApplicationError>;
+
+    fn handle(&mut self, msg: LogFile, _: &mut Self::Context) -> Self::Result {
+        let file = std::fs::File::open(&msg.0);
+        let year = fs::metadata(&msg.0)
+            .map(|meta| meta.modified())
+            .map(|maybe_time| {
+                maybe_time
+                    .map(|systime| LogSourceService::system_time_to_date_time(systime).year())
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0);
+
+        file.map_err(|_| ApplicationError::FailedToReadSource)
+            .map(|f| {
+                let lines = BufReader::new(f).lines();
+                let mut tx = msg.1.clone();
+                for lineresult in lines {
+                    match lineresult {
+                        Ok(line) => {
+                            let line = line.clone();
+                            match tx.poll_ready() {
+                                Ok(Async::Ready(_)) => {
+                                    if let Err(e) = tx.start_send(StreamEntry { line, year }) {
+                                        error!("Stream error: {:?}", e);
+                                        break;
+                                    };
+                                }
+                                Ok(Async::NotReady) => {
+                                    if let Err(e) = tx.poll_complete() {
+                                        error!("Stream error: {:?}", e);
+                                        break;
+                                    };
+                                    if let Err(e) = tx.start_send(StreamEntry { line, year }) {
+                                        error!("Stream error: {:?}", e);
+                                        break;
+                                    };
+                                }
+                                Err(e) => {
+                                    error!("Stream error: {:?}", e);
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Stream error: {:?}", e);
+                            break;
+                        }
+                    }
+                }
+            })
+    }
 }
 
 pub struct LogSourceService {
@@ -69,38 +135,10 @@ impl LogSourceService {
 
         match metadata.is_dir() {
             false => {
-                // see https://github.com/actix/actix/issues/181
-                let open_result = fs::File::open(path);
-                open_result
-                    .map_err(|_| ApplicationError::FailedToReadSource)
-                    .map(|f| {
-                        let tokio_file = tokio::fs::File::from_std(f);
-
-                        let year = fs::metadata(&path)
-                            .map(|meta| meta.modified())
-                            .map(|maybe_time| {
-                                maybe_time
-                                    .map(|systime| {
-                                        LogSourceService::system_time_to_date_time(systime).year()
-                                    })
-                                    .unwrap_or(0)
-                            })
-                            .unwrap_or(0);
-
-                        let linereader =
-                            tokio::codec::FramedRead::new(tokio_file, LogCodec::new(2048));
-                        let tx = self.tx.clone();
-                        let future = linereader
-                            .map(move |s| StreamEntry { line: s, year })
-                            .forward(tx.sink_map_err(|e| {
-                                io::Error::new(io::ErrorKind::Other, e.to_string())
-                            }))
-                            .map(|_| ())
-                            .map_err(|e| {
-                                error!("Stream error: {:?}", e);
-                            });
-                        self.state.run_blocking(future);
-                    })
+                self.state
+                    .streamer()
+                    .do_send(LogFile(path.to_string(), self.tx.clone()));
+                Ok(())
             }
             true => Err(ApplicationError::FailedToReadSource),
         }

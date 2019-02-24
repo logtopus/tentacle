@@ -2,7 +2,7 @@ use std;
 
 use actix_web;
 use actix_web::error::ResponseError;
-use actix_web::http;
+use actix_web::http::header;
 use actix_web::Binary;
 use actix_web::Body;
 use actix_web::HttpRequest;
@@ -19,12 +19,12 @@ impl ResponseError for state::ApplicationError {
     fn error_response(&self) -> HttpResponse {
         match *self {
             state::ApplicationError::SourceNotFound => HttpResponse::NotFound()
-                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(header::CONTENT_TYPE, "application/json")
                 .json(ErrorResponse {
                     message: self.to_string(),
                 }),
             state::ApplicationError::FailedToReadSource => HttpResponse::InternalServerError()
-                .header(http::header::CONTENT_TYPE, "application/json")
+                .header(header::CONTENT_TYPE, "application/json")
                 .json(ErrorResponse {
                     message: self.to_string(),
                 }),

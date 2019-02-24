@@ -19,14 +19,11 @@ grok = "0.5" # log parsing
 chrono = "0.4" # timestamp parsing
 failure = "0.1"
 futures = "0.1"
-http = "0.1"
 regex = "1"
 serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
-tokio = "0.1"
-tokio-threadpool = "0.1"
-flate2 = "1.0" # (de)compression
+flate2 = "1.0" # decompression
 #uuid = { version = "0.7", features = ["v4"] }
 #filetime = "0.2"
 

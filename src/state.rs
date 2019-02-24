@@ -1,12 +1,10 @@
 use std::sync::Arc;
 
 use failure::Fail;
-use futures::Future;
 
 use crate::logsource::LogSource;
+use crate::logsource_svc::LogFileStreamer;
 use grok::Grok;
-use std::sync::Mutex;
-use tokio::runtime::Runtime;
 
 #[derive(Fail, Debug)]
 pub enum ApplicationError {
@@ -20,7 +18,7 @@ pub enum ApplicationError {
 
 pub struct ServerState {
     sources: Arc<Vec<LogSource>>,
-    blk_rt: Arc<Mutex<Runtime>>,
+    streamer: Arc<actix::Addr<LogFileStreamer>>,
     pub grok: Arc<Grok>,
 }
 
@@ -28,7 +26,7 @@ impl Clone for ServerState {
     fn clone(&self) -> Self {
         ServerState {
             sources: self.sources.clone(),
-            blk_rt: self.blk_rt.clone(),
+            streamer: self.streamer.clone(),
             grok: self.grok.clone(),
         }
     }
@@ -38,16 +36,13 @@ impl ServerState {
     pub fn new(sources: Vec<LogSource>, grok: Grok) -> ServerState {
         ServerState {
             sources: Arc::new(sources),
-            blk_rt: Arc::new(Mutex::new(Runtime::new().unwrap())),
+            streamer: Arc::new(actix::sync::SyncArbiter::start(16, || LogFileStreamer {})),
             grok: Arc::new(grok),
         }
     }
 
-    pub fn run_blocking(&self, future: impl Future<Item = (), Error = ()> + Send + 'static) {
-        match self.blk_rt.lock().as_mut().map(|r| r.spawn(future)) {
-            Ok(_) => (),
-            Err(e) => error!("{}", e),
-        }
+    pub fn streamer(&self) -> Arc<actix::Addr<LogFileStreamer>> {
+        self.streamer.clone()
     }
 
     fn extract_source_key(source: &LogSource) -> &String {

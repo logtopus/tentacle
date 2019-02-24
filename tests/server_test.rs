@@ -1,9 +1,3 @@
-extern crate actix;
-extern crate actix_web;
-extern crate bytes;
-extern crate futures;
-extern crate http;
-
 use actix_web::HttpMessage;
 use futures::Future;
 
@@ -27,7 +21,7 @@ fn itest_health_api() {
                     .map_err(|_| support::TestError::Retry)
                     .map(|r| {
                         assert!(
-                            r.status() == http::StatusCode::OK,
+                            r.status() == 200,
                             format!("Query failed with error code {}", r.status())
                         );
                         r.body()

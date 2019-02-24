@@ -6,14 +6,13 @@ extern crate serde_derive;
 use crate::constants::AUTHORS;
 use crate::constants::VERSION;
 
-mod constants;
 mod cfg;
-mod server;
-mod state;
-mod logcodec;
+mod constants;
 mod logsource;
 mod logsource_port;
 mod logsource_svc;
+mod server;
+mod state;
 
 pub fn version() -> &'static str {
     VERSION
@@ -36,8 +35,8 @@ pub fn run(maybe_configfile: Option<&str>) {
 
     server::start_server(&settings);
 
-//    println!("\nConfiguration\n\n{:?} \n\n-----------",
-//             settings.try_into::<HashMap<String, config::Value>>().unwrap());
+    //    println!("\nConfiguration\n\n{:?} \n\n-----------",
+    //             settings.try_into::<HashMap<String, config::Value>>().unwrap());
 
     sys.run();
 }
