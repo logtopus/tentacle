@@ -10,7 +10,11 @@ jobs:
           key: tentacle-cache-v2
       - run:
           name: Test
-          command: cargo test --release
+          command: |
+            rm target/debug/tentacle
+            rm target/release/tentacle
+            cargo test --release
+          environment: RUST_BACKTRACE=1 
       - run:
           name: Build
           command: cargo build --release
