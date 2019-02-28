@@ -14,7 +14,8 @@ jobs:
             rm target/debug/tentacle
             rm target/release/tentacle
             cargo test --release
-          environment: RUST_BACKTRACE=1 
+          environment: 
+            RUST_BACKTRACE: 1 
       - run:
           name: Build
           command: cargo build --release
