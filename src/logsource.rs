@@ -17,6 +17,7 @@ pub struct LinePattern {
     pub raw: String,
     pub grok: Arc<grok::Pattern>,
     pub chrono: Arc<String>,
+    pub syslog_ts: bool, // indicates if the grok pattern is matching a syslog timestamp without year
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -40,14 +41,19 @@ pub enum LogSource {
 }
 
 impl LogSource {
-    fn apply_pattern(line: String, line_pattern: &LinePattern) -> ParsedLine {
+    fn apply_pattern(line: &str, line_pattern: &LinePattern, year: i32) -> ParsedLine {
         let maybe_matches = line_pattern.grok.match_against(&line);
-
         if let Some(matches) = maybe_matches {
             let timestamp = matches
                 .get("timestamp")
                 .map(|ts| {
-                    chrono::NaiveDateTime::parse_from_str(&ts, &line_pattern.chrono)
+                    let parse_result = if line_pattern.syslog_ts {
+                        let ts_w_year = format!("{} {}", year, ts);
+                        chrono::NaiveDateTime::parse_from_str(&ts_w_year, &line_pattern.chrono)
+                    } else {
+                        chrono::NaiveDateTime::parse_from_str(&ts, &line_pattern.chrono)
+                    };
+                    parse_result
                         .map(|dt| dt.timestamp() * 1000 + (dt.timestamp_subsec_millis() as i64))
                         .unwrap_or(0)
                 })
@@ -64,18 +70,18 @@ impl LogSource {
         }
     }
 
-    pub fn parse_line(&self, line: String) -> ParsedLine {
+    pub fn parse_line(&self, line: &str, year: i32) -> ParsedLine {
         match *self {
             LogSource::File {
                 id: _,
                 file_pattern: _,
                 ref line_pattern,
-            } => LogSource::apply_pattern(line, &line_pattern),
+            } => LogSource::apply_pattern(line, &line_pattern, year),
             LogSource::Journal {
                 id: _,
                 unit: _,
                 ref line_pattern,
-            } => LogSource::apply_pattern(line, &line_pattern),
+            } => LogSource::apply_pattern(line, &line_pattern, year),
         }
     }
 
@@ -97,11 +103,23 @@ impl LogSource {
             error!("{}", e);
             ConfigError::Message("Failed to parse line pattern".to_string())
         })?;
+        // special case: add year from file time if syslog pattern is used
+        let syslog_ts = if line_pattern.contains("%{SYSLOGTIMESTAMP:timestamp}") {
+            true
+        } else {
+            false
+        };
+
         let chrono_pattern = file_map
             .get("datetime_pattern")
             .ok_or(ConfigError::NotFound("datetime_pattern".to_string()))?
             .clone()
             .into_str()?;
+        let chrono_pattern = if syslog_ts {
+            format!("%Y {}", chrono_pattern)
+        } else {
+            chrono_pattern
+        };
 
         let srctype = file_map
             .get("type")
@@ -125,6 +143,7 @@ impl LogSource {
                         raw: line_pattern,
                         grok: Arc::new(grok_pattern),
                         chrono: Arc::new(chrono_pattern),
+                        syslog_ts,
                     },
                 })
             }
@@ -142,6 +161,7 @@ impl LogSource {
                         raw: line_pattern,
                         grok: Arc::new(grok_pattern),
                         chrono: Arc::new(chrono_pattern),
+                        syslog_ts,
                     },
                 })
             }
@@ -245,10 +265,11 @@ mod tests {
             raw: raw.to_string(),
             grok,
             chrono: chrono.clone(),
+            syslog_ts: false,
         };
 
-        let line = "2018-01-01 12:39:01 first message".to_string();
-        let parsed_line = LogSource::apply_pattern(line, &line_pattern);
+        let line = "2018-01-01 12:39:01 first message";
+        let parsed_line = LogSource::apply_pattern(line, &line_pattern, 2018);
         assert_eq!(1514810341000, parsed_line.timestamp);
         assert_eq!("first message", parsed_line.message);
 
@@ -257,15 +278,17 @@ mod tests {
                 .compile("%{SYSLOGTIMESTAMP:timestamp} %{GREEDYDATA:message}", true)
                 .unwrap(),
         );
+        let chrono = Arc::new("%Y %b %d %H:%M:%S".to_string());
         let line_pattern = LinePattern {
             raw: raw.to_string(),
             grok,
             chrono: chrono.clone(),
+            syslog_ts: true,
         };
 
-        let line = "Feb 10 13:17:01 second message".to_string();
-        let parsed_line = LogSource::apply_pattern(line, &line_pattern);
-        assert_eq!(0, parsed_line.timestamp);
+        let line = "Feb 28 13:29:46 second message";
+        let parsed_line = LogSource::apply_pattern(line, &line_pattern, 2019);
+        assert_eq!(1551360586000, parsed_line.timestamp);
         assert_eq!("second message", parsed_line.message);
     }
 }

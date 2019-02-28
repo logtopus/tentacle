@@ -105,7 +105,8 @@ fn get_source_content(
                                     .map_err(|_| actix_web::error::PayloadError::Incomplete)
                                     .map(move |stream_entry| {
                                         if as_json {
-                                            let mut parsed_line = src.parse_line(stream_entry.line);
+                                            let mut parsed_line = src
+                                                .parse_line(&stream_entry.line, stream_entry.year);
                                             if parsed_line.timestamp == 0 {
                                                 parsed_line.timestamp = last_ts;
                                             } else {

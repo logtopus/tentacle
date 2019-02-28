@@ -10,6 +10,8 @@ use crate::logcodec::LogCodec;
 use crate::logsource::LogSource;
 use crate::state;
 use crate::state::ApplicationError;
+use chrono::Datelike;
+use chrono::NaiveDateTime;
 use regex::Regex;
 use std::cmp::Ordering;
 use std::fs::read_dir;
@@ -28,6 +30,7 @@ impl actix::Message for LogSourceServiceMessage {
 
 pub struct StreamEntry {
     pub line: String,
+    pub year: i32,
 }
 
 pub struct LogSourceService {
@@ -43,6 +46,23 @@ impl LogSourceService {
         LogSourceService { state, tx }
     }
 
+    fn system_time_to_date_time(t: SystemTime) -> NaiveDateTime {
+        let (sec, nsec) = match t.duration_since(SystemTime::UNIX_EPOCH) {
+            Ok(dur) => (dur.as_secs() as i64, dur.subsec_nanos()),
+            Err(e) => {
+                // unlikely but should be handled
+                let dur = e.duration();
+                let (sec, nsec) = (dur.as_secs() as i64, dur.subsec_nanos());
+                if nsec == 0 {
+                    (-sec, 0)
+                } else {
+                    (-sec - 1, 1_000_000_000 - nsec)
+                }
+            }
+        };
+        NaiveDateTime::from_timestamp(sec, nsec)
+    }
+
     fn stream_file(&mut self, path: &str) -> Result<(), ApplicationError> {
         let metadata = fs::metadata(&path).map_err(|_| ApplicationError::FailedToReadSource)?;
 
@@ -55,11 +75,22 @@ impl LogSourceService {
                     .map(|f| {
                         let tokio_file = tokio::fs::File::from_std(f);
 
+                        let year = fs::metadata(&path)
+                            .map(|meta| meta.modified())
+                            .map(|maybe_time| {
+                                maybe_time
+                                    .map(|systime| {
+                                        LogSourceService::system_time_to_date_time(systime).year()
+                                    })
+                                    .unwrap_or(0)
+                            })
+                            .unwrap_or(0);
+
                         let linereader =
                             tokio::codec::FramedRead::new(tokio_file, LogCodec::new(2048));
                         let tx = self.tx.clone();
                         let future = linereader
-                            .map(move |s| StreamEntry { line: s })
+                            .map(move |s| StreamEntry { line: s, year })
                             .forward(tx.sink_map_err(|e| {
                                 io::Error::new(io::ErrorKind::Other, e.to_string())
                             }))
