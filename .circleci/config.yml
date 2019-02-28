@@ -11,8 +11,8 @@ jobs:
       - run:
           name: Test
           command: |
-            rm target/debug/tentacle
-            rm target/release/tentacle
+            rm -f target/debug/tentacle
+            rm -f target/release/tentacle
             cargo test --release
           environment: 
             RUST_BACKTRACE: 1 
