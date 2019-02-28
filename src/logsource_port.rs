@@ -91,37 +91,45 @@ fn get_source_content(
                     e.into()
                 })
                 .map(|_| match state.lookup_source(id.as_ref()) {
-                    Ok(Some(src)) => HttpResponse::Ok()
-                        .content_encoding(actix_web::http::ContentEncoding::Identity)
-                        .content_type(if as_json {
-                            "application/json"
-                        } else {
-                            "text/plain"
-                        })
-                        .streaming(
-                            rx_body
-                                .map_err(|_| actix_web::error::PayloadError::Incomplete)
-                                .map(move |stream_entry| {
-                                    if as_json {
-                                        match serde_json::to_vec(&src.parse_line(stream_entry.line))
-                                        {
-                                            Ok(mut vec) => {
-                                                vec.put_u8('\n' as u8);
-                                                Bytes::from(vec)
+                    Ok(Some(src)) => {
+                        let mut last_ts = 0;
+                        HttpResponse::Ok()
+                            .content_encoding(actix_web::http::ContentEncoding::Identity)
+                            .content_type(if as_json {
+                                "application/json"
+                            } else {
+                                "text/plain"
+                            })
+                            .streaming(
+                                rx_body
+                                    .map_err(|_| actix_web::error::PayloadError::Incomplete)
+                                    .map(move |stream_entry| {
+                                        if as_json {
+                                            let mut parsed_line = src.parse_line(stream_entry.line);
+                                            if parsed_line.timestamp == 0 {
+                                                parsed_line.timestamp = last_ts;
+                                            } else {
+                                                last_ts = parsed_line.timestamp;
                                             }
-                                            Err(e) => {
-                                                error!(
+                                            match serde_json::to_vec(&parsed_line) {
+                                                Ok(mut vec) => {
+                                                    vec.put_u8('\n' as u8);
+                                                    Bytes::from(vec)
+                                                }
+                                                Err(e) => {
+                                                    error!(
                                                     "Failed to convert stream entry to json: {}",
                                                     e
                                                 );
-                                                Bytes::new()
+                                                    Bytes::new()
+                                                }
                                             }
+                                        } else {
+                                            Bytes::from(stream_entry.line)
                                         }
-                                    } else {
-                                        Bytes::from(stream_entry.line)
-                                    }
-                                }),
-                        ),
+                                    }),
+                            )
+                    }
                     Ok(None) => ApplicationError::SourceNotFound.error_response(),
                     Err(e) => e.error_response(),
                 })

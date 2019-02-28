@@ -21,8 +21,8 @@ pub struct LinePattern {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ParsedLine {
-    timestamp: i64,
-    message: String,
+    pub timestamp: i64,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -59,7 +59,7 @@ impl LogSource {
         } else {
             ParsedLine {
                 timestamp: 0,
-                message: "<failed to parse entry>".to_string(),
+                message: format!("Failed to parse: {}", line),
             }
         }
     }
