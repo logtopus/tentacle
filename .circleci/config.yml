@@ -7,7 +7,7 @@ jobs:
     steps:
       - checkout
       - restore_cache:
-          key: tentacle-cache-v1
+          key: tentacle-cache-v2
       - run:
           name: Test
           command: cargo test --release
@@ -17,7 +17,7 @@ jobs:
       - store_artifacts:
           path: target/release/tentacle
       - save_cache:
-          key: tentacle-cache-v1
+          key: tentacle-cache-v2
           paths:
             - "~/.cargo"
             - "./target"
