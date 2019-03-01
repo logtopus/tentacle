@@ -65,11 +65,7 @@ fn itest_health_api() {
 }
 
 fn setup() -> std::process::Child {
-    use std::fs;
-
-    let exe = fs::metadata("target/release/tentacle")
-        .map(|_| "target/release/tentacle")
-        .unwrap_or("target/debug/tentacle");
+    let exe = support::binary("tentacle").unwrap();
 
     let server = std::process::Command::new(exe)
         .arg("--config=tests/integrationtests.yml")

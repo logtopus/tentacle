@@ -15,13 +15,15 @@ pub enum TestError {
 }
 
 pub fn run_with_retries<R, F>(request: &R, retries: i32, failmsg: &'static str) -> ()
-    where
-        F: futures::Future<Item=(), Error=TestError>,
-        R: Fn() -> F {
+where
+    F: futures::Future<Item = (), Error = TestError>,
+    R: Fn() -> F,
+{
     let mut retries = retries;
     let mut sys = actix::System::new("testsystem");
 
-    while retries >= 0 { // exec at least once
+    while retries >= 0 {
+        // exec at least once
         match sys.block_on(request()) {
             Ok(_) => break,
             Err(TestError::Fail) => assert!(false, failmsg),
@@ -40,17 +42,20 @@ pub fn run_with_retries<R, F>(request: &R, retries: i32, failmsg: &'static str) 
     actix::System::current().stop();
 }
 
+pub fn binary(name: &str) -> Result<std::path::PathBuf, std::io::Error> {
+    let exe = std::env::current_exe();
+    Ok(exe?.parent().unwrap().parent().unwrap().join(name))
+}
+
 pub fn run_test<S, T, U, V>(setup: S, test: T, teardown: U) -> ()
-    where
-        S: FnOnce() -> V + panic::UnwindSafe,
-        T: FnOnce() -> () + panic::UnwindSafe,
-        U: FnOnce(&mut V) -> () + panic::UnwindSafe
+where
+    S: FnOnce() -> V + panic::UnwindSafe,
+    T: FnOnce() -> () + panic::UnwindSafe,
+    U: FnOnce(&mut V) -> () + panic::UnwindSafe,
 {
     let mut state = setup();
 
-    let result = panic::catch_unwind(|| {
-        test()
-    });
+    let result = panic::catch_unwind(|| test());
 
     teardown(&mut state);
 
