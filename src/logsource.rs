@@ -168,21 +168,6 @@ impl LogSource {
             e => Err(ConfigError::Message(format!("Unknown type: {}", e))),
         }
     }
-
-    //    pub fn try_from_spec(dto: LogSourceSpec) -> Result<LogSource, ApplicationError> {
-    //        match dto.src_type {
-    //            LogSourceType::File => {
-    //                match dto.path {
-    //                    Some(p) => Ok(LogSource::File {
-    //                        folder: p
-    //                    }),
-    //                    None => Err(ApplicationError::MissingAttribute { attr: "path".to_string() })
-    //                }
-    //            }
-    //            LogSourceType::Journal =>
-    //                unimplemented!()
-    //        }
-    //    }
 }
 
 #[cfg(test)]

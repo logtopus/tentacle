@@ -16,8 +16,6 @@ pub enum ApplicationError {
     // indicates that a requested log source is configured but cannot be read
     #[fail(display = "Failed to read source")]
     FailedToReadSource,
-    //    #[fail(display = "Missing attribute: {}", attr)]
-    //    MissingAttribute { attr: String },
 }
 
 pub struct ServerState {

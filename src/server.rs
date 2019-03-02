@@ -119,8 +119,6 @@ mod tests {
     use actix_web::FromRequest;
     use actix_web::State;
 
-    //    use crate::state;
-
     #[test]
     fn test_index_handler() {
         let resp = TestRequest::with_header("content-type", "text/plain")
