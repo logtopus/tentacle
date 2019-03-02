@@ -12,6 +12,7 @@ use crate::state;
 use crate::state::ApplicationError;
 use chrono::Datelike;
 use chrono::NaiveDateTime;
+use flate2::read::GzDecoder;
 use regex::Regex;
 use std::cmp::Ordering;
 use std::fs::read_dir;
