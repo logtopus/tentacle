@@ -135,9 +135,14 @@ impl LogSourceService {
 
         match metadata.is_dir() {
             false => {
-                self.state
+                let result = self
+                    .state
                     .streamer()
-                    .do_send(LogFile(path.to_string(), self.tx.clone()));
+                    .send(LogFile(path.to_string(), self.tx.clone()))
+                    .wait();
+                if let Err(t) = result {
+                    error!("Failed to stream file: {}", t);
+                };
                 Ok(())
             }
             true => Err(ApplicationError::FailedToReadSource),
