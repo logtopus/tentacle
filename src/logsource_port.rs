@@ -126,7 +126,9 @@ fn get_source_content(
                                                 }
                                             }
                                         } else {
-                                            Bytes::from(stream_entry.line)
+                                            let mut vec = stream_entry.line.into_bytes();
+                                            vec.put_u8('\n' as u8);
+                                            Bytes::from(vec)
                                         }
                                     }),
                             )
