@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::Lines;
 
 use crate::logsource::LogSource;
 use crate::state;
@@ -9,6 +10,7 @@ use actix;
 use chrono::Datelike;
 use chrono::NaiveDateTime;
 use flate2::read::GzDecoder;
+use futures::future::Future;
 use futures::sync::mpsc::Sender;
 use futures::Async;
 use futures::Sink;
@@ -45,6 +47,22 @@ impl actix::Actor for LogFileStreamer {
     type Context = actix::sync::SyncContext<Self>;
 }
 
+enum LinesIter {
+    GZIP(Lines<BufReader<GzDecoder<std::fs::File>>>),
+    PLAIN(Lines<BufReader<std::fs::File>>),
+}
+
+impl Iterator for LinesIter {
+    type Item = std::io::Result<String>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            LinesIter::GZIP(it) => it.next(),
+            LinesIter::PLAIN(it) => it.next(),
+        }
+    }
+}
+
 impl actix::Handler<LogFile> for LogFileStreamer {
     type Result = Result<(), ApplicationError>;
 
@@ -61,35 +79,36 @@ impl actix::Handler<LogFile> for LogFileStreamer {
 
         file.map_err(|_| ApplicationError::FailedToReadSource)
             .map(|f| {
-                let lines = BufReader::new(f).lines();
+                let lines: LinesIter = if msg.0.ends_with(".gz") {
+                    LinesIter::GZIP(BufReader::new(GzDecoder::new(f)).lines())
+                } else {
+                    LinesIter::PLAIN(BufReader::new(f).lines())
+                };
                 let mut tx = msg.1.clone();
                 for lineresult in lines {
                     match lineresult {
-                        Ok(line) => {
-                            let line = line.clone();
-                            match tx.poll_ready() {
-                                Ok(Async::Ready(_)) => {
-                                    if let Err(e) = tx.start_send(StreamEntry { line, year }) {
-                                        error!("Stream error: {:?}", e);
-                                        break;
-                                    };
-                                }
-                                Ok(Async::NotReady) => {
-                                    if let Err(e) = tx.poll_complete() {
-                                        error!("Stream error: {:?}", e);
-                                        break;
-                                    };
-                                    if let Err(e) = tx.start_send(StreamEntry { line, year }) {
-                                        error!("Stream error: {:?}", e);
-                                        break;
-                                    };
-                                }
-                                Err(e) => {
+                        Ok(line) => match tx.poll_ready() {
+                            Ok(Async::Ready(_)) => {
+                                if let Err(e) = tx.start_send(StreamEntry { line, year }) {
                                     error!("Stream error: {:?}", e);
                                     break;
-                                }
+                                };
                             }
-                        }
+                            Ok(Async::NotReady) => {
+                                if let Err(e) = tx.poll_complete() {
+                                    error!("Stream error: {:?}", e);
+                                    break;
+                                };
+                                if let Err(e) = tx.start_send(StreamEntry { line, year }) {
+                                    error!("Stream error: {:?}", e);
+                                    break;
+                                };
+                            }
+                            Err(e) => {
+                                error!("Stream error: {:?}", e);
+                                break;
+                            }
+                        },
                         Err(e) => {
                             error!("Stream error: {:?}", e);
                             break;
@@ -170,16 +189,11 @@ impl LogSourceService {
                         let maybe_matches = file_pattern.captures(path);
                         if let Some(captures) = maybe_matches {
                             debug!("matching file: {}", path);
-                            if path.ends_with(".gz") {
-                                warn!("Currently skipping gz files");
-                                None
-                            } else {
-                                let rotation_idx = captures
-                                    .name("rotation")
-                                    .map(|e| e.as_str().parse::<i32>())
-                                    .and_then(|r| r.ok());
-                                Some((path.to_string(), rotation_idx.unwrap_or(0)))
-                            }
+                            let rotation_idx = captures
+                                .name("rotation")
+                                .map(|e| e.as_str().parse::<i32>())
+                                .and_then(|r| r.ok());
+                            Some((path.to_string(), rotation_idx.unwrap_or(0)))
                         } else {
                             None
                         }
@@ -256,8 +270,9 @@ mod tests {
     fn test_resolve_files() {
         let regex = Regex::new(r#"tests/demo\.log(\.(?P<rotation>\d)(\.gz)?)?"#).unwrap();
         let result = LogSourceService::resolve_files(&regex).unwrap();
-        assert_eq!(result.len(), 2);
-        assert_eq!(result.get(0), Some(&"tests/demo.log.1".to_string()));
-        assert_eq!(result.get(1), Some(&"tests/demo.log".to_string()));
+        assert_eq!(result.len(), 3);
+        assert_eq!(result.get(0), Some(&"tests/demo.log.2.gz".to_string()));
+        assert_eq!(result.get(1), Some(&"tests/demo.log.1".to_string()));
+        assert_eq!(result.get(2), Some(&"tests/demo.log".to_string()));
     }
 }

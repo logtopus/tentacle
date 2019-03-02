@@ -14,9 +14,9 @@ pub enum TestError {
     Fail,
 }
 
-pub fn run_with_retries<R, F>(request: &R, retries: i32, failmsg: &'static str) -> ()
+pub fn run_with_retries<R, I, F>(request: &R, retries: i32, failmsg: &'static str) -> ()
 where
-    F: futures::Future<Item = (), Error = TestError>,
+    F: futures::Future<Item = I, Error = TestError>,
     R: Fn() -> F,
 {
     let mut retries = retries;
