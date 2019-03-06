@@ -1,122 +1,29 @@
 use std::fs;
-use std::io::BufRead;
-use std::io::BufReader;
-use std::io::Lines;
 
+use crate::data::ApplicationError;
+use crate::data::LinePattern;
+use crate::data::LogFilter;
+use crate::data::StreamEntry;
+use crate::log_streamer::StreamLogFile;
 use crate::logsource::LogSource;
 use crate::state;
-use crate::state::ApplicationError;
 use actix;
-use chrono::Datelike;
-use chrono::NaiveDateTime;
-use flate2::read::GzDecoder;
 use futures::future::Future;
-use futures::sync::mpsc::Sender;
-use futures::Async;
-use futures::Sink;
 use regex::Regex;
 use std::cmp::Ordering;
 use std::fs::read_dir;
 use std::fs::DirEntry;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 #[derive(Debug)]
 pub enum LogSourceServiceMessage {
-    StreamSourceContent(String),
+    StreamSourceContent(String, Arc<LogFilter>),
 }
 
 impl actix::Message for LogSourceServiceMessage {
     type Result = core::result::Result<(), ApplicationError>;
-}
-
-pub struct StreamEntry {
-    pub line: String,
-    pub year: i32,
-}
-
-struct LogFile(pub String, pub Sender<StreamEntry>);
-
-impl actix::Message for LogFile {
-    type Result = Result<(), ApplicationError>;
-}
-
-pub struct LogFileStreamer;
-
-impl actix::Actor for LogFileStreamer {
-    type Context = actix::sync::SyncContext<Self>;
-}
-
-enum LinesIter {
-    GZIP(Lines<BufReader<GzDecoder<std::fs::File>>>),
-    PLAIN(Lines<BufReader<std::fs::File>>),
-}
-
-impl Iterator for LinesIter {
-    type Item = std::io::Result<String>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        match self {
-            LinesIter::GZIP(it) => it.next(),
-            LinesIter::PLAIN(it) => it.next(),
-        }
-    }
-}
-
-impl actix::Handler<LogFile> for LogFileStreamer {
-    type Result = Result<(), ApplicationError>;
-
-    fn handle(&mut self, msg: LogFile, _: &mut Self::Context) -> Self::Result {
-        let file = std::fs::File::open(&msg.0);
-        let year = fs::metadata(&msg.0)
-            .map(|meta| meta.modified())
-            .map(|maybe_time| {
-                maybe_time
-                    .map(|systime| LogSourceService::system_time_to_date_time(systime).year())
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
-
-        file.map_err(|_| ApplicationError::FailedToReadSource)
-            .map(|f| {
-                let lines: LinesIter = if msg.0.ends_with(".gz") {
-                    LinesIter::GZIP(BufReader::new(GzDecoder::new(f)).lines())
-                } else {
-                    LinesIter::PLAIN(BufReader::new(f).lines())
-                };
-                let mut tx = msg.1.clone();
-                for lineresult in lines {
-                    match lineresult {
-                        Ok(line) => match tx.poll_ready() {
-                            Ok(Async::Ready(_)) => {
-                                if let Err(e) = tx.start_send(StreamEntry { line, year }) {
-                                    error!("Stream error: {:?}", e);
-                                    break;
-                                };
-                            }
-                            Ok(Async::NotReady) => {
-                                if let Err(e) = tx.poll_complete() {
-                                    error!("Stream error: {:?}", e);
-                                    break;
-                                };
-                                if let Err(e) = tx.start_send(StreamEntry { line, year }) {
-                                    error!("Stream error: {:?}", e);
-                                    break;
-                                };
-                            }
-                            Err(e) => {
-                                error!("Stream error: {:?}", e);
-                                break;
-                            }
-                        },
-                        Err(e) => {
-                            error!("Stream error: {:?}", e);
-                            break;
-                        }
-                    }
-                }
-            })
-    }
 }
 
 pub struct LogSourceService {
@@ -132,24 +39,12 @@ impl LogSourceService {
         LogSourceService { state, tx }
     }
 
-    fn system_time_to_date_time(t: SystemTime) -> NaiveDateTime {
-        let (sec, nsec) = match t.duration_since(SystemTime::UNIX_EPOCH) {
-            Ok(dur) => (dur.as_secs() as i64, dur.subsec_nanos()),
-            Err(e) => {
-                // unlikely but should be handled
-                let dur = e.duration();
-                let (sec, nsec) = (dur.as_secs() as i64, dur.subsec_nanos());
-                if nsec == 0 {
-                    (-sec, 0)
-                } else {
-                    (-sec - 1, 1_000_000_000 - nsec)
-                }
-            }
-        };
-        NaiveDateTime::from_timestamp(sec, nsec)
-    }
-
-    fn stream_file(&mut self, path: &str) -> Result<(), ApplicationError> {
+    fn stream_file(
+        &mut self,
+        path: &str,
+        line_pattern: LinePattern,
+        logfilter: Arc<LogFilter>,
+    ) -> Result<(), ApplicationError> {
         let metadata = fs::metadata(&path).map_err(|_| ApplicationError::FailedToReadSource)?;
 
         match metadata.is_dir() {
@@ -157,7 +52,12 @@ impl LogSourceService {
                 let result = self
                     .state
                     .streamer()
-                    .send(LogFile(path.to_string(), self.tx.clone()))
+                    .send(StreamLogFile {
+                        path: path.to_string(),
+                        line_pattern,
+                        filter: logfilter,
+                        tx: self.tx.clone(),
+                    })
                     .wait();
                 if let Err(t) = result {
                     error!("Failed to stream file: {}", t);
@@ -229,17 +129,22 @@ impl actix::Handler<LogSourceServiceMessage> for LogSourceService {
 
     fn handle(&mut self, msg: LogSourceServiceMessage, _ctx: &mut Self::Context) -> Self::Result {
         match msg {
-            LogSourceServiceMessage::StreamSourceContent(id) => {
+            LogSourceServiceMessage::StreamSourceContent(id, logfilter) => {
                 let lookup = self.state.lookup_source(id.as_ref());
                 lookup.and_then(|maybe_src| match maybe_src {
                     Some(LogSource::File {
                         id: _,
                         file_pattern,
-                        line_pattern: _,
+                        line_pattern,
                     }) => {
                         let result = LogSourceService::resolve_files(&file_pattern);
                         match result {
-                            Ok(files) => files.iter().map(|file| self.stream_file(file)).collect(),
+                            Ok(files) => files
+                                .iter()
+                                .map(|file| {
+                                    self.stream_file(file, line_pattern.clone(), logfilter.clone())
+                                })
+                                .collect(),
                             Err(_e) => Err(ApplicationError::FailedToReadSource),
                         }
                     }

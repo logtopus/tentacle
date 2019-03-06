@@ -1,20 +1,9 @@
 use std::sync::Arc;
 
-use failure::Fail;
-
+use crate::data::ApplicationError;
+use crate::log_streamer::LogFileStreamer;
 use crate::logsource::LogSource;
-use crate::logsource_svc::LogFileStreamer;
 use grok::Grok;
-
-#[derive(Fail, Debug)]
-pub enum ApplicationError {
-    // indicates that a requested log source is not configured
-    #[fail(display = "Source not found")]
-    SourceNotFound,
-    // indicates that a requested log source is configured but cannot be read
-    #[fail(display = "Failed to read source")]
-    FailedToReadSource,
-}
 
 pub struct ServerState {
     sources: Arc<Vec<LogSource>>,

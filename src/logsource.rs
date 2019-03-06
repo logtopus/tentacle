@@ -3,27 +3,14 @@ use config::Value;
 
 use grok::Grok;
 use regex::Regex;
-
 use std::sync::Arc;
+
+use crate::data::LinePattern;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd)]
 pub enum LogSourceType {
     File,
     Journal, // see https://docs.rs/systemd/0.0.8/systemd/journal/index.html
-}
-
-#[derive(Debug, Clone)]
-pub struct LinePattern {
-    pub raw: String,
-    pub grok: Arc<grok::Pattern>,
-    pub chrono: Arc<String>,
-    pub syslog_ts: bool, // indicates if the grok pattern is matching a syslog timestamp without year
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct ParsedLine {
-    pub timestamp: i64,
-    pub message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -41,50 +28,6 @@ pub enum LogSource {
 }
 
 impl LogSource {
-    fn apply_pattern(line: &str, line_pattern: &LinePattern, year: i32) -> ParsedLine {
-        let maybe_matches = line_pattern.grok.match_against(&line);
-        if let Some(matches) = maybe_matches {
-            let timestamp = matches
-                .get("timestamp")
-                .map(|ts| {
-                    let parse_result = if line_pattern.syslog_ts {
-                        let ts_w_year = format!("{} {}", year, ts);
-                        chrono::NaiveDateTime::parse_from_str(&ts_w_year, &line_pattern.chrono)
-                    } else {
-                        chrono::NaiveDateTime::parse_from_str(&ts, &line_pattern.chrono)
-                    };
-                    parse_result
-                        .map(|dt| dt.timestamp() * 1000 + (dt.timestamp_subsec_millis() as i64))
-                        .unwrap_or(0)
-                })
-                .unwrap_or(0);
-            ParsedLine {
-                timestamp,
-                message: matches.get("message").unwrap_or("").to_string(),
-            }
-        } else {
-            ParsedLine {
-                timestamp: 0,
-                message: format!("Failed to parse: {}", line),
-            }
-        }
-    }
-
-    pub fn parse_line(&self, line: &str, year: i32) -> ParsedLine {
-        match *self {
-            LogSource::File {
-                id: _,
-                file_pattern: _,
-                ref line_pattern,
-            } => LogSource::apply_pattern(line, &line_pattern, year),
-            LogSource::Journal {
-                id: _,
-                unit: _,
-                ref line_pattern,
-            } => LogSource::apply_pattern(line, &line_pattern, year),
-        }
-    }
-
     pub fn try_from_config(value: &Value, grok: &mut Grok) -> Result<LogSource, ConfigError> {
         use regex::Regex;
 
@@ -172,10 +115,8 @@ impl LogSource {
 
 #[cfg(test)]
 mod tests {
-    use crate::logsource::LinePattern;
     use crate::logsource::LogSource;
     use grok::Grok;
-    use std::sync::Arc;
 
     #[test]
     fn test_fileconfig_conversion() {
@@ -200,13 +141,13 @@ mod tests {
                 assert_eq!(file_pattern.as_str(), r#"demo\.log(\.\d(\.gz)?)?"#);
                 assert_eq!(
                     line_pattern.raw,
-                    "%{TIMESTAMP_ISO8601:timestamp} %{GREEDYDATA:msg}"
+                    "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:loglevel} %{GREEDYDATA:msg}"
                 );
                 assert_eq!(line_pattern.chrono.as_ref(), "%b %d %H:%M:%S");
 
                 let matches = line_pattern
                     .grok
-                    .match_against("2007-08-31T16:47+00:00 Some message")
+                    .match_against("2007-08-31T16:47+00:00 DEBUG Some message")
                     .unwrap();
                 assert_eq!(matches.get("timestamp"), Some("2007-08-31T16:47+00:00"));
                 assert_eq!(matches.get("msg"), Some("Some message"));
@@ -239,41 +180,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_apply_pattern() {
-        let mut grok_default = grok::Grok::default();
-
-        let raw = "%{TIMESTAMP_ISO8601:timestamp} %{GREEDYDATA:message}";
-        let grok = Arc::new(grok_default.compile(raw, true).unwrap());
-        let chrono = Arc::new("%Y-%m-%d %H:%M:%S".to_string());
-        let line_pattern = LinePattern {
-            raw: raw.to_string(),
-            grok,
-            chrono: chrono.clone(),
-            syslog_ts: false,
-        };
-
-        let line = "2018-01-01 12:39:01 first message";
-        let parsed_line = LogSource::apply_pattern(line, &line_pattern, 2018);
-        assert_eq!(1514810341000, parsed_line.timestamp);
-        assert_eq!("first message", parsed_line.message);
-
-        let grok = Arc::new(
-            grok_default
-                .compile("%{SYSLOGTIMESTAMP:timestamp} %{GREEDYDATA:message}", true)
-                .unwrap(),
-        );
-        let chrono = Arc::new("%Y %b %d %H:%M:%S".to_string());
-        let line_pattern = LinePattern {
-            raw: raw.to_string(),
-            grok,
-            chrono: chrono.clone(),
-            syslog_ts: true,
-        };
-
-        let line = "Feb 28 13:29:46 second message";
-        let parsed_line = LogSource::apply_pattern(line, &line_pattern, 2019);
-        assert_eq!(1551360586000, parsed_line.timestamp);
-        assert_eq!("second message", parsed_line.message);
-    }
 }

@@ -8,6 +8,8 @@ use crate::constants::VERSION;
 
 mod cfg;
 mod constants;
+mod data;
+mod log_streamer;
 mod logsource;
 mod logsource_port;
 mod logsource_svc;

@@ -7,8 +7,13 @@ use std::sync::RwLock;
 
 mod support;
 
+struct ProcessHolder {
+    process: std::process::Child,
+    usage: i8,
+}
+
 lazy_static! {
-    static ref SERVER_RUNNING: RwLock<bool> = RwLock::new(false);
+    static ref SERVER_RUNNING: RwLock<Option<ProcessHolder>> = RwLock::new(None);
 }
 
 #[test]
@@ -105,10 +110,6 @@ fn itest_get_source_content_api() {
                                             support::TestError::Fail
                                         })
                                         .map(|s| s.to_string())
-                                    // .map(|s| {
-                                    //     assert_eq!(s, "2019-01-01 09:00:01 demo1line12019-01-01 10:00:01 demo0line12019-01-01 10:00:02 demo0line22019-01-01 09:00:02 demo1line2");
-                                    //     Ok(())
-                                    // })
                                 }, // flatten result
                             )
                             .and_then(|r| r)
@@ -118,15 +119,15 @@ fn itest_get_source_content_api() {
                 result.map(|s| {
                     assert_eq!(
                         s,
-                        r#"2019-01-01 08:00:01 demo2line1
-2019-01-01 08:00:02 demo2line2
-2019-01-01 08:00:03 demo2line3
-2019-01-01 09:00:01 demo1line1
-2019-01-01 09:00:02 demo1line2
-2019-01-01 10:00:01 demo0line1
-2019-01-01 10:00:02 demo0line2
-2019-01-01 10:00:03 demo0line3
-2019-01-01 10:00:04 demo0line4
+                        r#"2019-01-01 08:00:01 ERROR demo2line1
+2019-01-01 08:00:02 DEBUG demo2line2
+2019-01-01 08:00:03 INFO demo2line3
+2019-01-01 09:00:01 WARNING demo1line1
+2019-01-01 09:00:02 DEBUG demo1line2
+2019-01-01 10:00:01 DEBUG demo0line1
+2019-01-01 10:00:02 DEBUG demo0line2
+2019-01-01 10:00:03 ERROR demo0line3
+2019-01-01 10:00:04 INFO demo0line4
 "#
                     );
                     s
@@ -139,28 +140,98 @@ fn itest_get_source_content_api() {
     )
 }
 
-fn setup() -> Option<std::process::Child> {
-    let mut wlock = SERVER_RUNNING.write().unwrap();
-    if *wlock {
-        return None;
-    }
+#[test]
+fn itest_get_source_content_api_with_logfilter() {
+    support::run_test(
+        setup,
+        || {
+            fn request() -> impl futures::Future<Item = String, Error = support::TestError> {
+                let content_api_request = actix_web::client::ClientRequest::get(
+                    "http://localhost:18080/api/v1/sources/itest/content?loglevels=DEBUG",
+                )
+                .header("User-Agent", "Actix-web")
+                .header("Accept", "text/plain")
+                .timeout(std::time::Duration::from_millis(1000))
+                .finish()
+                .unwrap();
 
-    let exe = support::binary("tentacle").unwrap();
-    let process = std::process::Command::new(exe)
-        .arg("--config=tests/integrationtests.yml")
-        .spawn()
-        .expect("Failed to run server");
+                let result = content_api_request
+                    .send()
+                    .map_err(|_| support::TestError::Retry)
+                    .map(|r| {
+                        assert!(
+                            r.status() == 200,
+                            format!("Query failed with error code {}", r.status())
+                        );
+                        r.body()
+                    })
+                    .map(
+                        |body| {
+                            body.map_err(|e| {
+                                assert!(false, e);
+                                support::TestError::Fail
+                            })
+                            .map(
+                                |bytes| {
+                                    std::str::from_utf8(&bytes)
+                                        .map_err(|e| {
+                                            assert!(false, e);
+                                            support::TestError::Fail
+                                        })
+                                        .map(|s| s.to_string())
+                                }, // flatten result
+                            )
+                            .and_then(|r| r)
+                        }, // flatten result
+                    )
+                    .and_then(|r| r); // flatten result
+                result.map(|s| {
+                    assert_eq!(
+                        s,
+                        r#"2019-01-01 08:00:02 DEBUG demo2line2
+2019-01-01 09:00:02 DEBUG demo1line2
+2019-01-01 10:00:01 DEBUG demo0line1
+2019-01-01 10:00:02 DEBUG demo0line2
+"#
+                    );
+                    s
+                })
+            }
 
-    (*wlock) = true;
-    Some(process)
+            support::run_with_retries(&request, 10, "Failed to query source content api")
+        },
+        teardown,
+    )
 }
 
-fn teardown(maybe_server: &mut Option<std::process::Child>) {
-    println!("Stopping tentacle server");
+fn setup() -> bool {
+    let mut wlock = SERVER_RUNNING.write().unwrap();
+    match &mut *wlock {
+        Some(s) => {
+            s.usage += 1;
+            false
+        }
 
-    if let Some(server) = maybe_server {
-        let mut wlock = SERVER_RUNNING.write().unwrap();
-        server.kill().unwrap();
-        (*wlock) = false;
+        None => {
+            let exe = support::binary("tentacle").unwrap();
+            let process = std::process::Command::new(exe)
+                .arg("--config=tests/integrationtests.yml")
+                .spawn()
+                .expect("Failed to run server");
+
+            (*wlock) = Some(ProcessHolder { process, usage: 1 });
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            true
+        }
+    }
+}
+fn teardown(_: &mut bool) {
+    let mut wlock = SERVER_RUNNING.write().unwrap();
+    if let Some(s) = &mut *wlock {
+        s.usage -= 1;
+        if s.usage <= 0 {
+            println!("Stopping tentacle server");
+            (*wlock).take().map(|mut s| s.process.kill().unwrap());
+        }
     }
 }

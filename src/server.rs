@@ -10,20 +10,20 @@ use actix_web::HttpResponse;
 use config;
 
 use crate::constants::*;
+use crate::data::ApplicationError;
 use crate::logsource::LogSource;
 use crate::logsource_port;
-use crate::state;
 use crate::state::ServerState;
 
-impl ResponseError for state::ApplicationError {
+impl ResponseError for ApplicationError {
     fn error_response(&self) -> HttpResponse {
         match *self {
-            state::ApplicationError::SourceNotFound => HttpResponse::NotFound()
+            ApplicationError::SourceNotFound => HttpResponse::NotFound()
                 .header(header::CONTENT_TYPE, "application/json")
                 .json(ErrorResponse {
                     message: self.to_string(),
                 }),
-            state::ApplicationError::FailedToReadSource => HttpResponse::InternalServerError()
+            ApplicationError::FailedToReadSource => HttpResponse::InternalServerError()
                 .header(header::CONTENT_TYPE, "application/json")
                 .json(ErrorResponse {
                     message: self.to_string(),

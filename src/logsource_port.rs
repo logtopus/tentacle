@@ -1,7 +1,6 @@
 use actix;
 use actix::Actor;
 use actix_web;
-use actix_web::error::ResponseError;
 use actix_web::AsyncResponder;
 use actix_web::HttpResponse;
 use bytes::BufMut;
@@ -9,12 +8,13 @@ use bytes::Bytes;
 use futures;
 use futures::Future;
 use futures::Stream;
+use std::sync::Arc;
 
+use crate::data::LogFilter;
 use crate::logsource::LogSource;
 use crate::logsource::LogSourceType;
 use crate::logsource_svc::LogSourceService;
 use crate::logsource_svc::LogSourceServiceMessage;
-use crate::state::ApplicationError;
 use crate::state::ServerState;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -27,6 +27,11 @@ pub struct LogSourceRepr {
     pub file_pattern: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct Filter {
+    loglevels: Option<String>,
 }
 
 impl From<&LogSource> for LogSourceRepr {
@@ -67,8 +72,18 @@ pub fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
     HttpResponse::Ok().json(dto)
 }
 
+fn logfilter_from_query(filter: &Filter) -> LogFilter {
+    LogFilter {
+        loglevels: filter
+            .loglevels
+            .clone()
+            .map(|s| s.split(",").map(|s| s.to_string()).collect()),
+    }
+}
+
 fn get_source_content(
     id: actix_web::Path<String>,
+    filter: actix_web::Query<Filter>,
     state: actix_web::State<ServerState>,
     as_json: bool,
 ) -> actix_web::FutureResponse<HttpResponse> {
@@ -76,7 +91,11 @@ fn get_source_content(
 
     let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
     let logsourcesvc = LogSourceService::new(state.clone(), tx).start();
-    let request = logsourcesvc.send(LogSourceServiceMessage::StreamSourceContent(id.to_string()));
+
+    let request = logsourcesvc.send(LogSourceServiceMessage::StreamSourceContent(
+        id.to_string(),
+        Arc::new(logfilter_from_query(&filter)),
+    ));
 
     request
         .map_err(|e| {
@@ -90,51 +109,46 @@ fn get_source_content(
                     error!("{}", e);
                     e.into()
                 })
-                .map(|_| match state.lookup_source(id.as_ref()) {
-                    Ok(Some(src)) => {
-                        let mut last_ts = 0;
-                        HttpResponse::Ok()
-                            .content_encoding(actix_web::http::ContentEncoding::Identity)
-                            .content_type(if as_json {
-                                "application/json"
-                            } else {
-                                "text/plain"
-                            })
-                            .streaming(
-                                rx_body
-                                    .map_err(|_| actix_web::error::PayloadError::Incomplete)
-                                    .map(move |stream_entry| {
-                                        if as_json {
-                                            let mut parsed_line = src
-                                                .parse_line(&stream_entry.line, stream_entry.year);
-                                            if parsed_line.timestamp == 0 {
-                                                parsed_line.timestamp = last_ts;
-                                            } else {
-                                                last_ts = parsed_line.timestamp;
+                .map(|_| {
+                    let mut last_ts = 0;
+                    HttpResponse::Ok()
+                        .content_encoding(actix_web::http::ContentEncoding::Identity)
+                        .content_type(if as_json {
+                            "application/json"
+                        } else {
+                            "text/plain"
+                        })
+                        .streaming(
+                            rx_body
+                                .map_err(|_| actix_web::error::PayloadError::Incomplete)
+                                .map(move |mut stream_entry| {
+                                    if stream_entry.parsed_line.timestamp == 0 {
+                                        stream_entry.parsed_line.timestamp = last_ts;
+                                    } else {
+                                        last_ts = stream_entry.parsed_line.timestamp;
+                                    }
+
+                                    if as_json {
+                                        match serde_json::to_vec(&stream_entry.parsed_line) {
+                                            Ok(mut vec) => {
+                                                vec.put_u8('\n' as u8);
+                                                Bytes::from(vec)
                                             }
-                                            match serde_json::to_vec(&parsed_line) {
-                                                Ok(mut vec) => {
-                                                    vec.put_u8('\n' as u8);
-                                                    Bytes::from(vec)
-                                                }
-                                                Err(e) => {
-                                                    error!(
+                                            Err(e) => {
+                                                error!(
                                                     "Failed to convert stream entry to json: {}",
                                                     e
                                                 );
-                                                    Bytes::new()
-                                                }
+                                                Bytes::new()
                                             }
-                                        } else {
-                                            let mut vec = stream_entry.line.into_bytes();
-                                            vec.put_u8('\n' as u8);
-                                            Bytes::from(vec)
                                         }
-                                    }),
-                            )
-                    }
-                    Ok(None) => ApplicationError::SourceNotFound.error_response(),
-                    Err(e) => e.error_response(),
+                                    } else {
+                                        let mut vec = stream_entry.line.into_bytes();
+                                        vec.put_u8('\n' as u8);
+                                        Bytes::from(vec)
+                                    }
+                                }),
+                        )
                 })
         })
         .responder()
@@ -142,16 +156,18 @@ fn get_source_content(
 
 pub fn get_source_content_text(
     id: actix_web::Path<String>,
+    filter: actix_web::Query<Filter>,
     state: actix_web::State<ServerState>,
 ) -> actix_web::FutureResponse<HttpResponse> {
-    get_source_content(id, state, false)
+    get_source_content(id, filter, state, false)
 }
 
 pub fn get_source_content_json(
     id: actix_web::Path<String>,
+    filter: actix_web::Query<Filter>,
     state: actix_web::State<ServerState>,
 ) -> actix_web::FutureResponse<HttpResponse> {
-    get_source_content(id, state, true)
+    get_source_content(id, filter, state, true)
 }
 
 // #[cfg(test)]

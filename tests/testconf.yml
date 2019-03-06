@@ -4,7 +4,7 @@ sources:
   - id: test-log
     type: log
     file_pattern: demo\.log(\.\d(\.gz)?)?
-    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{GREEDYDATA:msg}"
+    line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:loglevel} %{GREEDYDATA:msg}"
     datetime_pattern: "%b %d %H:%M:%S"
   - id: test-journal
     type: journal
