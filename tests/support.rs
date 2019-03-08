@@ -2,6 +2,10 @@
 extern crate actix;
 extern crate futures;
 
+use actix_web::client::ClientRequest;
+use actix_web::http::StatusCode;
+use actix_web::HttpMessage;
+use futures::Future;
 use std::panic;
 use std::thread;
 use std::time::Duration;
@@ -60,4 +64,39 @@ where
     teardown(&mut state);
 
     result.unwrap();
+}
+
+pub fn http_request(
+    req: ClientRequest,
+    expected_status: StatusCode,
+) -> impl futures::Future<Item = String, Error = TestError> {
+    req.send()
+        .map_err(|_| TestError::Retry)
+        .map(move |r| {
+            assert!(
+                r.status() == expected_status,
+                format!("Query failed with error code {}", r.status())
+            );
+            r.body()
+        })
+        .map(
+            |body| {
+                body.map_err(|e| {
+                    assert!(false, e);
+                    TestError::Fail
+                })
+                .map(
+                    |bytes| {
+                        std::str::from_utf8(&bytes)
+                            .map_err(|e| {
+                                assert!(false, e);
+                                TestError::Fail
+                            })
+                            .map(|s| s.to_string())
+                    }, // flatten result
+                )
+                .and_then(|r| r)
+            }, // flatten result
+        )
+        .and_then(|r| r) // flatten result
 }

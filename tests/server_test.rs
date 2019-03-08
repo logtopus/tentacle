@@ -1,12 +1,11 @@
 #[macro_use]
 extern crate lazy_static;
 
-use actix_web::HttpMessage;
+use actix_web::http::StatusCode;
 use futures::Future;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::Weak;
-
 mod support;
 
 struct ProcessHolder {
@@ -29,51 +28,22 @@ fn itest_health_api() {
     support::run_test(
         setup,
         || {
-            fn request() -> impl futures::Future<Item = (), Error = support::TestError> {
-                let health_api_request =
-                    actix_web::client::ClientRequest::get("http://localhost:18080/api/v1/health")
-                        .header("User-Agent", "Actix-web")
-                        .timeout(std::time::Duration::from_millis(1000))
-                        .finish()
-                        .unwrap();
-
-                health_api_request
-                    .send()
-                    .map_err(|_| support::TestError::Retry)
-                    .map(|r| {
-                        assert!(
-                            r.status() == 200,
-                            format!("Query failed with error code {}", r.status())
-                        );
-                        r.body()
-                    })
-                    .map(
-                        |body| {
-                            body.map_err(|e| {
-                                assert!(false, e);
-                                support::TestError::Fail
-                            })
-                            .map(
-                                |bytes| {
-                                    std::str::from_utf8(&bytes)
-                                        .map_err(|e| {
-                                            assert!(false, e);
-                                            support::TestError::Fail
-                                        })
-                                        .map(|s| {
-                                            assert!(s == "");
-                                            Ok(())
-                                        })
-                                        .and_then(|r| r)
-                                }, // flatten result
-                            )
-                            .and_then(|r| r)
-                        }, // flatten result
+            support::run_with_retries(
+                &|| {
+                    let req = actix_web::client::ClientRequest::get(
+                        "http://localhost:18080/api/v1/health",
                     )
-                    .and_then(|r| r) // flatten result
-            }
+                    .header("User-Agent", "Actix-web")
+                    .header("Accept", "*/*")
+                    .timeout(std::time::Duration::from_millis(1000))
+                    .finish()
+                    .unwrap();
 
-            support::run_with_retries(&request, 10, "Failed to query health api")
+                    support::http_request(req, StatusCode::OK).map(|s| assert_eq!(s, ""))
+                },
+                10,
+                "Failed to query health api",
+            )
         },
         teardown,
     )
@@ -84,50 +54,22 @@ fn itest_get_source_content_api() {
     support::run_test(
         setup,
         || {
-            fn request() -> impl futures::Future<Item = String, Error = support::TestError> {
-                let content_api_request = actix_web::client::ClientRequest::get(
-                    "http://localhost:18080/api/v1/sources/itest/content",
-                )
-                .header("User-Agent", "Actix-web")
-                .header("Accept", "text/plain")
-                .timeout(std::time::Duration::from_millis(1000))
-                .finish()
-                .unwrap();
-
-                let result = content_api_request
-                    .send()
-                    .map_err(|_| support::TestError::Retry)
-                    .map(|r| {
-                        assert!(
-                            r.status() == 200,
-                            format!("Query failed with error code {}", r.status())
-                        );
-                        r.body()
-                    })
-                    .map(
-                        |body| {
-                            body.map_err(|e| {
-                                assert!(false, e);
-                                support::TestError::Fail
-                            })
-                            .map(
-                                |bytes| {
-                                    std::str::from_utf8(&bytes)
-                                        .map_err(|e| {
-                                            assert!(false, e);
-                                            support::TestError::Fail
-                                        })
-                                        .map(|s| s.to_string())
-                                }, // flatten result
-                            )
-                            .and_then(|r| r)
-                        }, // flatten result
+            support::run_with_retries(
+                &|| {
+                    let req = actix_web::client::ClientRequest::get(
+                        "http://localhost:18080/api/v1/sources/itest/content",
                     )
-                    .and_then(|r| r); // flatten result
-                result.map(|s| {
-                    assert_eq!(
-                        s,
-                        r#"2019-01-01 08:00:01 ERROR demo2line1
+                    .header("User-Agent", "Actix-web")
+                    .header("Accept", "*/*")
+                    .timeout(std::time::Duration::from_millis(1000))
+                    .finish()
+                    .unwrap();
+
+                    let result = support::http_request(req, StatusCode::OK);
+                    result.map(|s| {
+                        assert_eq!(
+                            s,
+                            r#"2019-01-01 08:00:01 ERROR demo2line1
 2019-01-01 08:00:02 DEBUG demo2line2
 2019-01-01 08:00:03 INFO demo2line3
 2019-01-01 09:00:01 WARNING demo1line1
@@ -137,12 +79,12 @@ fn itest_get_source_content_api() {
 2019-01-01 10:00:03 ERROR demo0line3
 2019-01-01 10:00:04 INFO demo0line4
 "#
-                    );
-                    s
-                })
-            }
-
-            support::run_with_retries(&request, 10, "Failed to query source content api")
+                        )
+                    })
+                },
+                10,
+                "Failed to query source content api",
+            )
         },
         teardown,
     )
@@ -153,60 +95,32 @@ fn itest_get_source_content_api_with_logfilter() {
     support::run_test(
         setup,
         || {
-            fn request() -> impl futures::Future<Item = String, Error = support::TestError> {
-                let content_api_request = actix_web::client::ClientRequest::get(
-                    "http://localhost:18080/api/v1/sources/itest/content?loglevels=DEBUG",
-                )
-                .header("User-Agent", "Actix-web")
-                .header("Accept", "text/plain")
-                .timeout(std::time::Duration::from_millis(1000))
-                .finish()
-                .unwrap();
-
-                let result = content_api_request
-                    .send()
-                    .map_err(|_| support::TestError::Retry)
-                    .map(|r| {
-                        assert!(
-                            r.status() == 200,
-                            format!("Query failed with error code {}", r.status())
-                        );
-                        r.body()
-                    })
-                    .map(
-                        |body| {
-                            body.map_err(|e| {
-                                assert!(false, e);
-                                support::TestError::Fail
-                            })
-                            .map(
-                                |bytes| {
-                                    std::str::from_utf8(&bytes)
-                                        .map_err(|e| {
-                                            assert!(false, e);
-                                            support::TestError::Fail
-                                        })
-                                        .map(|s| s.to_string())
-                                }, // flatten result
-                            )
-                            .and_then(|r| r)
-                        }, // flatten result
+            support::run_with_retries(
+                &|| {
+                    let req = actix_web::client::ClientRequest::get(
+                        "http://localhost:18080/api/v1/sources/itest/content?loglevels=DEBUG",
                     )
-                    .and_then(|r| r); // flatten result
-                result.map(|s| {
-                    assert_eq!(
-                        s,
-                        r#"2019-01-01 08:00:02 DEBUG demo2line2
+                    .header("User-Agent", "Actix-web")
+                    .header("Accept", "*/*")
+                    .timeout(std::time::Duration::from_millis(1000))
+                    .finish()
+                    .unwrap();
+
+                    let result = support::http_request(req, StatusCode::OK);
+                    result.map(|s| {
+                        assert_eq!(
+                            s,
+                            r#"2019-01-01 08:00:02 DEBUG demo2line2
 2019-01-01 09:00:02 DEBUG demo1line2
 2019-01-01 10:00:01 DEBUG demo0line1
 2019-01-01 10:00:02 DEBUG demo0line2
 "#
-                    );
-                    s
-                })
-            }
-
-            support::run_with_retries(&request, 10, "Failed to query source content api")
+                        )
+                    })
+                },
+                10,
+                "Failed to query source content api",
+            )
         },
         teardown,
     )
@@ -215,10 +129,7 @@ fn itest_get_source_content_api_with_logfilter() {
 fn setup() -> Arc<ProcessHolder> {
     let mut wlock = SERVER_RUNNING.write().unwrap();
     match &mut *wlock {
-        Some(s) => {
-            let arc = s.upgrade().unwrap().clone();
-            arc
-        }
+        Some(s) => s.upgrade().unwrap().clone(),
         None => {
             let exe = support::binary("tentacle").unwrap();
             let process = std::process::Command::new(exe)
@@ -233,4 +144,5 @@ fn setup() -> Arc<ProcessHolder> {
         }
     }
 }
+
 fn teardown(_: &mut Arc<ProcessHolder>) {}
