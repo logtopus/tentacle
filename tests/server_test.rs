@@ -3,17 +3,25 @@ extern crate lazy_static;
 
 use actix_web::HttpMessage;
 use futures::Future;
+use std::sync::Arc;
 use std::sync::RwLock;
+use std::sync::Weak;
 
 mod support;
 
 struct ProcessHolder {
     process: std::process::Child,
-    usage: i8,
+}
+
+impl Drop for ProcessHolder {
+    fn drop(&mut self) {
+        println!("Stopping tentacle server"); // only shown with --nocapture flag
+        self.process.kill().unwrap();
+    }
 }
 
 lazy_static! {
-    static ref SERVER_RUNNING: RwLock<Option<ProcessHolder>> = RwLock::new(None);
+    static ref SERVER_RUNNING: RwLock<Option<Weak<ProcessHolder>>> = RwLock::new(None);
 }
 
 #[test]
@@ -204,14 +212,13 @@ fn itest_get_source_content_api_with_logfilter() {
     )
 }
 
-fn setup() -> bool {
+fn setup() -> Arc<ProcessHolder> {
     let mut wlock = SERVER_RUNNING.write().unwrap();
     match &mut *wlock {
         Some(s) => {
-            s.usage += 1;
-            false
+            let arc = s.upgrade().unwrap().clone();
+            arc
         }
-
         None => {
             let exe = support::binary("tentacle").unwrap();
             let process = std::process::Command::new(exe)
@@ -219,19 +226,11 @@ fn setup() -> bool {
                 .spawn()
                 .expect("Failed to run server");
 
-            (*wlock) = Some(ProcessHolder { process, usage: 1 });
+            let arc = Arc::new(ProcessHolder { process });
+            (*wlock) = Some(Arc::downgrade(&arc));
             std::thread::sleep(std::time::Duration::from_millis(1000));
-            true
+            arc
         }
     }
 }
-fn teardown(_: &mut bool) {
-    let mut wlock = SERVER_RUNNING.write().unwrap();
-    if let Some(s) = &mut *wlock {
-        s.usage -= 1;
-        if s.usage <= 0 {
-            println!("Stopping tentacle server");
-            (*wlock).take().map(|mut s| s.process.kill().unwrap());
-        }
-    }
-}
+fn teardown(_: &mut Arc<ProcessHolder>) {}
