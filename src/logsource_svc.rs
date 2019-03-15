@@ -68,11 +68,14 @@ impl LogSourceService {
         }
     }
 
-    fn resolve_files(file_pattern: &Regex) -> Result<Vec<String>, ApplicationError> {
+    fn resolve_files(file_pattern: &Regex, from_ms: u128) -> Result<Vec<String>, ApplicationError> {
         let folder = Path::new(file_pattern.as_str())
             .parent()
             .ok_or(ApplicationError::FailedToReadSource)?;
+
         debug!("Reading folder {:?}", folder);
+
+        let now = SystemTime::now();
 
         let files_iter = read_dir(folder)
             .map_err(|e| {
@@ -88,6 +91,19 @@ impl LogSourceService {
                     .map(|path| {
                         let maybe_matches = file_pattern.captures(path);
                         if let Some(captures) = maybe_matches {
+                            if from_ms > 0 {
+                                let modtime = fs::metadata(&path)
+                                    .map(|meta| meta.modified())
+                                    .map(|maybe_time| maybe_time.unwrap_or_else(|_| now))
+                                    .unwrap_or_else(|_| now);
+                                let modtime_ms = modtime
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .expect("Time went backwards")
+                                    .as_millis();
+                                if modtime_ms < from_ms {
+                                    return None;
+                                }
+                            }
                             debug!("matching file: {}", path);
                             let rotation_idx = captures
                                 .name("rotation")
@@ -103,8 +119,6 @@ impl LogSourceService {
             });
 
         let mut vec: Vec<(String, i32)> = files_iter.collect();
-
-        let now = SystemTime::now();
 
         vec.sort_by(|(path_a, idx_a), (path_b, idx_b)| match idx_b.cmp(idx_a) {
             Ordering::Equal => {
@@ -137,7 +151,8 @@ impl actix::Handler<LogSourceServiceMessage> for LogSourceService {
                         file_pattern,
                         line_pattern,
                     }) => {
-                        let result = LogSourceService::resolve_files(&file_pattern);
+                        let result =
+                            LogSourceService::resolve_files(&file_pattern, logfilter.from_ms);
                         match result {
                             Ok(files) => files
                                 .iter()
@@ -174,7 +189,7 @@ mod tests {
     #[test]
     fn test_resolve_files() {
         let regex = Regex::new(r#"tests/demo\.log(\.(?P<rotation>\d)(\.gz)?)?"#).unwrap();
-        let result = LogSourceService::resolve_files(&regex).unwrap();
+        let result = LogSourceService::resolve_files(&regex, 0).unwrap();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get(0), Some(&"tests/demo.log.2.gz".to_string()));
         assert_eq!(result.get(1), Some(&"tests/demo.log.1".to_string()));

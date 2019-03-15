@@ -76,7 +76,9 @@ impl LogFileStreamer {
                         chrono::NaiveDateTime::parse_from_str(&ts, &line_pattern.chrono)
                     };
                     parse_result
-                        .map(|dt| dt.timestamp() * 1000 + (dt.timestamp_subsec_millis() as i64))
+                        .map(|dt| {
+                            dt.timestamp() as u128 * 1000 + (dt.timestamp_subsec_millis() as u128)
+                        })
                         .unwrap_or(0)
                 })
                 .unwrap_or(0);

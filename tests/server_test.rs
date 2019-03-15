@@ -57,7 +57,7 @@ fn itest_get_source_content_api() {
             support::run_with_retries(
                 &|| {
                     let req = actix_web::client::ClientRequest::get(
-                        "http://localhost:18080/api/v1/sources/itest/content",
+                        "http://localhost:18080/api/v1/sources/itest/content?from_ms=1546329603000",
                     )
                     .header("User-Agent", "Actix-web")
                     .header("Accept", "*/*")
@@ -69,9 +69,7 @@ fn itest_get_source_content_api() {
                     result.map(|s| {
                         assert_eq!(
                             s,
-                            r#"2019-01-01 08:00:01 ERROR demo2line1
-2019-01-01 08:00:02 DEBUG demo2line2
-2019-01-01 08:00:03 INFO demo2line3
+                            r#"2019-01-01 08:00:03 INFO demo2line3
 2019-01-01 09:00:01 WARNING demo1line1
 2019-01-01 09:00:02 DEBUG demo1line2
 2019-01-01 10:00:01 DEBUG demo0line1
@@ -98,7 +96,7 @@ fn itest_get_source_content_api_with_logfilter() {
             support::run_with_retries(
                 &|| {
                     let req = actix_web::client::ClientRequest::get(
-                        "http://localhost:18080/api/v1/sources/itest/content?loglevels=DEBUG",
+                        "http://localhost:18080/api/v1/sources/itest/content?loglevels=DEBUG&from_ms=0",
                     )
                     .header("User-Agent", "Actix-web")
                     .header("Accept", "*/*")

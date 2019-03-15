@@ -13,7 +13,7 @@ pub enum ApplicationError {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct ParsedLine {
-    pub timestamp: i64,
+    pub timestamp: u128,
     pub loglevel: Option<String>,
     pub message: String,
 }
@@ -26,6 +26,7 @@ pub struct StreamEntry {
 
 #[derive(Debug)]
 pub struct LogFilter {
+    pub from_ms: u128,
     pub loglevels: Option<Vec<String>>,
 }
 
@@ -34,12 +35,16 @@ impl LogFilter {
     /// If the logline matches the filter and should be included within the output
     /// the this returns true.
     pub fn matches(&self, parsed_line: &ParsedLine) -> bool {
-        match &self.loglevels {
-            Some(filter) => match &parsed_line.loglevel {
-                Some(loglvl) => filter.iter().any(|f| f == loglvl),
-                None => false,
-            },
-            None => true, // no filter, everything matches
+        if parsed_line.timestamp >= self.from_ms {
+            match &self.loglevels {
+                Some(filter) => match &parsed_line.loglevel {
+                    Some(loglvl) => filter.iter().any(|f| f == loglvl),
+                    None => false,
+                },
+                None => true, // no filter, everything matches
+            }
+        } else {
+            false
         }
     }
 }
