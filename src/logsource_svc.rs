@@ -101,6 +101,7 @@ impl LogSourceService {
                                     .expect("Time went backwards")
                                     .as_millis();
                                 if modtime_ms < from_ms {
+                                    debug!("{} older than timestamp filter", path);
                                     return None;
                                 }
                             }

@@ -54,5 +54,6 @@ pub struct LinePattern {
     pub raw: String,
     pub grok: Arc<grok::Pattern>,
     pub chrono: Arc<String>,
+    pub timezone: chrono_tz::Tz,
     pub syslog_ts: bool, // indicates if the grok pattern is matching a syslog timestamp without year
 }

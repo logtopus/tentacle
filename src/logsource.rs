@@ -64,6 +64,13 @@ impl LogSource {
             chrono_pattern
         };
 
+        let timezone = file_map
+            .get("timezone")
+            .ok_or(ConfigError::NotFound("timezone".to_string()))?
+            .clone()
+            .into_str()?;
+        let timezone: chrono_tz::Tz = timezone.parse().unwrap();
+
         let srctype = file_map
             .get("type")
             .ok_or(ConfigError::NotFound("type".to_string()))?
@@ -86,6 +93,7 @@ impl LogSource {
                         raw: line_pattern,
                         grok: Arc::new(grok_pattern),
                         chrono: Arc::new(chrono_pattern),
+                        timezone,
                         syslog_ts,
                     },
                 })
@@ -104,6 +112,7 @@ impl LogSource {
                         raw: line_pattern,
                         grok: Arc::new(grok_pattern),
                         chrono: Arc::new(chrono_pattern),
+                        timezone,
                         syslog_ts,
                     },
                 })

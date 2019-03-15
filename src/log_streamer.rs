@@ -4,8 +4,10 @@ use crate::data::LogFilter;
 use crate::data::ParsedLine;
 use crate::data::StreamEntry;
 
+use chrono::DateTime;
 use chrono::Datelike;
 use chrono::NaiveDateTime;
+use chrono::Utc;
 use flate2::read::GzDecoder;
 use futures::sink::Sink;
 use futures::sync::mpsc::Sender;
@@ -76,8 +78,10 @@ impl LogFileStreamer {
                         chrono::NaiveDateTime::parse_from_str(&ts, &line_pattern.chrono)
                     };
                     parse_result
-                        .map(|dt| {
-                            dt.timestamp() as u128 * 1000 + (dt.timestamp_subsec_millis() as u128)
+                        .map(|ndt| {
+                            let dt = DateTime::<Utc>::from_utc(ndt, Utc);
+                            dt.with_timezone(&line_pattern.timezone).timestamp() as u128 * 1000
+                                + (dt.timestamp_subsec_millis() as u128)
                         })
                         .unwrap_or(0)
                 })
@@ -172,6 +176,7 @@ impl actix::Handler<StreamLogFile> for LogFileStreamer {
 mod tests {
     use crate::data::LinePattern;
     use crate::log_streamer::LogFileStreamer;
+    use chrono_tz::UTC;
     use std::sync::Arc;
 
     #[test]
@@ -185,6 +190,7 @@ mod tests {
             raw: raw.to_string(),
             grok,
             chrono: chrono.clone(),
+            timezone: UTC,
             syslog_ts: false,
         };
 
@@ -203,6 +209,7 @@ mod tests {
             raw: raw.to_string(),
             grok,
             chrono: chrono.clone(),
+            timezone: UTC,
             syslog_ts: true,
         };
 

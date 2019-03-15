@@ -6,3 +6,4 @@ sources:
     file_pattern: tests/demo\.log(\.(?P<rotation>\d)(\.gz)?)?
     line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:loglevel} %{GREEDYDATA:message}"
     datetime_pattern: "%Y-%m-%d %H:%M:%S"
+    timezone: Europe/Berlin
