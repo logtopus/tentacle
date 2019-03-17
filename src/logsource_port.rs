@@ -74,14 +74,8 @@ pub fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
 }
 
 fn logfilter_from_query(filter: &Filter) -> LogFilter {
-    let now = std::time::SystemTime::now();
-    let now_ms = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("Time went backwards")
-        .as_millis()
-        - (1000 * 60 * 60); // default start is now - 1hour
     LogFilter {
-        from_ms: filter.from_ms.map(|dt| dt as u128).unwrap_or(now_ms),
+        from_ms: filter.from_ms.map(|dt| dt as u128).unwrap_or(0),
         loglevels: filter
             .loglevels
             .clone()

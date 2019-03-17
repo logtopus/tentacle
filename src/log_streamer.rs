@@ -4,11 +4,9 @@ use crate::data::LogFilter;
 use crate::data::ParsedLine;
 use crate::data::StreamEntry;
 
-use chrono::DateTime;
 use chrono::Datelike;
 use chrono::NaiveDateTime;
 use chrono::TimeZone;
-use chrono::Utc;
 use flate2::read::GzDecoder;
 use futures::sink::Sink;
 use futures::sync::mpsc::Sender;
