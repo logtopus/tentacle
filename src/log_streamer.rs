@@ -7,6 +7,7 @@ use crate::data::StreamEntry;
 use chrono::DateTime;
 use chrono::Datelike;
 use chrono::NaiveDateTime;
+use chrono::TimeZone;
 use chrono::Utc;
 use flate2::read::GzDecoder;
 use futures::sink::Sink;
@@ -79,9 +80,15 @@ impl LogFileStreamer {
                     };
                     parse_result
                         .map(|ndt| {
-                            let dt = DateTime::<Utc>::from_utc(ndt, Utc);
-                            dt.with_timezone(&line_pattern.timezone).timestamp() as u128 * 1000
-                                + (dt.timestamp_subsec_millis() as u128)
+                            line_pattern
+                                .timezone
+                                .from_local_datetime(&ndt)
+                                .single()
+                                .map(|dt| {
+                                    dt.timestamp() as u128 * 1000
+                                        + (dt.timestamp_subsec_millis() as u128)
+                                })
+                                .unwrap_or(0)
                         })
                         .unwrap_or(0)
                 })

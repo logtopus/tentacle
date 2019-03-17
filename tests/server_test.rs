@@ -57,7 +57,7 @@ fn itest_get_source_content_api() {
             support::run_with_retries(
                 &|| {
                     let req = actix_web::client::ClientRequest::get(
-                        "http://localhost:18080/api/v1/sources/itest/content?from_ms=1546329603000",
+                        "http://localhost:18080/api/v1/sources/itest/content?from_ms=1546326003000",
                     )
                     .header("User-Agent", "Actix-web")
                     .header("Accept", "*/*")
