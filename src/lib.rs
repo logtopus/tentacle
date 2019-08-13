@@ -3,18 +3,21 @@ extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
+use actix;
+
 use crate::constants::AUTHORS;
 use crate::constants::VERSION;
 
 mod cfg;
 mod constants;
 mod data;
-mod log_streamer;
 mod logsource;
 mod logsource_port;
+mod logsource_repo;
 mod logsource_svc;
 mod server;
 mod state;
+mod util;
 
 pub fn version() -> &'static str {
     VERSION
@@ -40,5 +43,5 @@ pub fn run(maybe_configfile: Option<&str>) {
     //    println!("\nConfiguration\n\n{:?} \n\n-----------",
     //             settings.try_into::<HashMap<String, config::Value>>().unwrap());
 
-    sys.run();
+    sys.run().unwrap();
 }

@@ -1,7 +1,6 @@
-use actix;
-use actix::Actor;
-use actix_web;
-use actix_web::AsyncResponder;
+use actix_web::error::ResponseError;
+use actix_web::http::header;
+use actix_web::web;
 use actix_web::HttpResponse;
 use bytes::BufMut;
 use bytes::Bytes;
@@ -10,12 +9,35 @@ use futures::Future;
 use futures::Stream;
 use std::sync::Arc;
 
+use crate::data::ApplicationError;
 use crate::data::LogFilter;
 use crate::logsource::LogSource;
 use crate::logsource::LogSourceType;
+use crate::logsource_repo::LogSourceRepository;
 use crate::logsource_svc::LogSourceService;
-use crate::logsource_svc::LogSourceServiceMessage;
 use crate::state::ServerState;
+
+#[derive(Serialize, Deserialize, Debug)]
+struct ErrorResponse {
+    message: String,
+}
+
+impl ResponseError for ApplicationError {
+    fn error_response(&self) -> HttpResponse {
+        match *self {
+            ApplicationError::SourceNotFound => HttpResponse::NotFound()
+                .header(header::CONTENT_TYPE, "application/json")
+                .json(ErrorResponse {
+                    message: self.to_string(),
+                }),
+            ApplicationError::FailedToReadSource => HttpResponse::InternalServerError()
+                .header(header::CONTENT_TYPE, "application/json")
+                .json(ErrorResponse {
+                    message: self.to_string(),
+                }),
+        }
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LogSourceRepr {
@@ -64,7 +86,7 @@ impl From<&LogSource> for LogSourceRepr {
     }
 }
 
-pub fn get_sources(state: actix_web::State<ServerState>) -> HttpResponse {
+pub fn get_sources(state: web::Data<ServerState>) -> HttpResponse {
     let dto: Vec<LogSourceRepr> = state
         .get_sources()
         .iter()
@@ -84,91 +106,70 @@ fn logfilter_from_query(filter: &Filter) -> LogFilter {
 }
 
 fn get_source_content(
-    id: actix_web::Path<String>,
-    filter: actix_web::Query<Filter>,
-    state: actix_web::State<ServerState>,
+    id: web::Path<String>,
+    filter: web::Query<Filter>,
+    state: web::Data<ServerState>,
     as_json: bool,
-) -> actix_web::FutureResponse<HttpResponse> {
+) -> impl Future<Item = HttpResponse, Error = actix_web::Error> {
     debug!("Content for source {} requested", id);
 
     let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
-    let logsourcesvc = LogSourceService::new(state.clone(), tx).start();
+    let reposvc = LogSourceRepository::new(tx);
+    let domainsvc = LogSourceService::new(state.get_ref().clone(), reposvc);
 
-    let request = logsourcesvc.send(LogSourceServiceMessage::StreamSourceContent(
-        id.to_string(),
-        Arc::new(logfilter_from_query(&filter)),
-    ));
-
-    request
-        .map_err(|e| {
-            error!("{}", e);
-            e
-        })
-        .from_err()
-        .and_then(move |result| {
-            result
-                .map_err(|e| {
-                    error!("{}", e);
-                    e.into()
-                })
-                .map(|_| {
-                    let mut last_ts = 0;
-                    HttpResponse::Ok()
-                        .content_encoding(actix_web::http::ContentEncoding::Identity)
-                        .content_type(if as_json {
-                            "application/json"
+    domainsvc
+        .stream_source_content(id.to_string(), Arc::new(logfilter_from_query(&filter)))
+        .map_err(|e| e.into())
+        .and_then(move |_| {
+            let mut last_ts = 0;
+            futures::future::ok(
+                HttpResponse::Ok()
+                    .content_type(if as_json {
+                        "application/json"
+                    } else {
+                        "text/plain"
+                    })
+                    .streaming(rx_body.map(move |mut stream_entry| {
+                        if stream_entry.parsed_line.timestamp == 0 {
+                            stream_entry.parsed_line.timestamp = last_ts;
                         } else {
-                            "text/plain"
-                        })
-                        .streaming(
-                            rx_body
-                                .map_err(|_| actix_web::error::PayloadError::Incomplete)
-                                .map(move |mut stream_entry| {
-                                    if stream_entry.parsed_line.timestamp == 0 {
-                                        stream_entry.parsed_line.timestamp = last_ts;
-                                    } else {
-                                        last_ts = stream_entry.parsed_line.timestamp;
-                                    }
+                            last_ts = stream_entry.parsed_line.timestamp;
+                        }
 
-                                    if as_json {
-                                        match serde_json::to_vec(&stream_entry.parsed_line) {
-                                            Ok(mut vec) => {
-                                                vec.put_u8('\n' as u8);
-                                                Bytes::from(vec)
-                                            }
-                                            Err(e) => {
-                                                error!(
-                                                    "Failed to convert stream entry to json: {}",
-                                                    e
-                                                );
-                                                Bytes::new()
-                                            }
-                                        }
-                                    } else {
-                                        let mut vec = stream_entry.line.into_bytes();
-                                        vec.put_u8('\n' as u8);
-                                        Bytes::from(vec)
-                                    }
-                                }),
-                        )
-                })
+                        if as_json {
+                            match serde_json::to_vec(&stream_entry.parsed_line) {
+                                Ok(mut vec) => {
+                                    vec.put_u8('\n' as u8);
+                                    Bytes::from(vec)
+                                }
+                                Err(e) => {
+                                    error!("Failed to convert stream entry to json: {}", e);
+                                    Bytes::new()
+                                }
+                            }
+                        } else {
+                            let mut vec = stream_entry.line.into_bytes();
+                            vec.put_u8('\n' as u8);
+                            Bytes::from(vec)
+                        }
+                    })),
+            )
         })
-        .responder()
 }
 
 pub fn get_source_content_text(
-    id: actix_web::Path<String>,
-    filter: actix_web::Query<Filter>,
-    state: actix_web::State<ServerState>,
-) -> actix_web::FutureResponse<HttpResponse> {
+    id: web::Path<String>,
+    filter: web::Query<Filter>,
+    state: web::Data<ServerState>,
+) -> impl Future<Item = HttpResponse, Error = actix_web::Error> {
     get_source_content(id, filter, state, false)
 }
 
 pub fn get_source_content_json(
-    id: actix_web::Path<String>,
-    filter: actix_web::Query<Filter>,
-    state: actix_web::State<ServerState>,
-) -> actix_web::FutureResponse<HttpResponse> {
+    id: web::Path<String>,
+    filter: web::Query<Filter>,
+    state: web::Data<ServerState>,
+) -> impl Future<Item = HttpResponse, Error = actix_web::Error> {
     get_source_content(id, filter, state, true)
 }
 

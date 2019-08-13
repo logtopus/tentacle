@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate lazy_static;
 
+use awc;
+
 use actix_web::http::StatusCode;
 use futures::Future;
 use std::sync::Arc;
@@ -30,14 +32,11 @@ fn itest_health_api() {
         || {
             support::run_with_retries(
                 &|| {
-                    let req = actix_web::client::ClientRequest::get(
-                        "http://localhost:18080/api/v1/health",
-                    )
-                    .header("User-Agent", "Actix-web")
-                    .header("Accept", "*/*")
-                    .timeout(std::time::Duration::from_millis(1000))
-                    .finish()
-                    .unwrap();
+                    let req = awc::Client::default()
+                        .get("http://localhost:18080/api/v1/health")
+                        .header("User-Agent", "Actix-web")
+                        .header("Accept", "*/*")
+                        .timeout(std::time::Duration::from_millis(1000));
 
                     support::http_request(req, StatusCode::OK).map(|s| assert_eq!(s, ""))
                 },
@@ -56,17 +55,14 @@ fn itest_get_source_content_api() {
         || {
             support::run_with_retries(
                 &|| {
-                    let req = actix_web::client::ClientRequest::get(
+                    let req = awc::Client::default().get(
                         "http://localhost:18080/api/v1/sources/itest/content?from_ms=1546326003000",
                     )
                     .header("User-Agent", "Actix-web")
                     .header("Accept", "*/*")
-                    .timeout(std::time::Duration::from_millis(1000))
-                    .finish()
-                    .unwrap();
+                    .timeout(std::time::Duration::from_millis(1000));
 
-                    let result = support::http_request(req, StatusCode::OK);
-                    result.map(|s| {
+                    support::http_request(req, StatusCode::OK).map(|s| {
                         assert_eq!(
                             s,
                             r#"2019-01-01 08:00:03 INFO demo2line3
@@ -95,17 +91,15 @@ fn itest_get_source_content_api_with_logfilter() {
         || {
             support::run_with_retries(
                 &|| {
-                    let req = actix_web::client::ClientRequest::get(
+                    let req = awc::Client::default().get(
                         "http://localhost:18080/api/v1/sources/itest/content?loglevels=DEBUG&from_ms=0",
                     )
                     .header("User-Agent", "Actix-web")
                     .header("Accept", "*/*")
-                    .timeout(std::time::Duration::from_millis(1000))
-                    .finish()
-                    .unwrap();
+                    .timeout(std::time::Duration::from_millis(1000));
 
-                    let result = support::http_request(req, StatusCode::OK);
-                    result.map(|s| {
+                    support::http_request(req, StatusCode::OK).map(|s| {
+                        dbg!(&s);
                         assert_eq!(
                             s,
                             r#"2019-01-01 08:00:02 DEBUG demo2line2

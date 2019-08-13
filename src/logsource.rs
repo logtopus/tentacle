@@ -29,8 +29,6 @@ pub enum LogSource {
 
 impl LogSource {
     pub fn try_from_config(value: &Value, grok: &mut Grok) -> Result<LogSource, ConfigError> {
-        use regex::Regex;
-
         let file_map = value.clone().into_table()?;
 
         let id = file_map

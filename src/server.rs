@@ -1,41 +1,17 @@
 use std;
 
 use actix_web;
-use actix_web::error::ResponseError;
-use actix_web::http::header;
-use actix_web::Binary;
-use actix_web::Body;
+use actix_web::guard;
+use actix_web::middleware;
+use actix_web::web;
 use actix_web::HttpRequest;
 use actix_web::HttpResponse;
 use config;
 
 use crate::constants::*;
-use crate::data::ApplicationError;
 use crate::logsource::LogSource;
 use crate::logsource_port;
 use crate::state::ServerState;
-
-impl ResponseError for ApplicationError {
-    fn error_response(&self) -> HttpResponse {
-        match *self {
-            ApplicationError::SourceNotFound => HttpResponse::NotFound()
-                .header(header::CONTENT_TYPE, "application/json")
-                .json(ErrorResponse {
-                    message: self.to_string(),
-                }),
-            ApplicationError::FailedToReadSource => HttpResponse::InternalServerError()
-                .header(header::CONTENT_TYPE, "application/json")
-                .json(ErrorResponse {
-                    message: self.to_string(),
-                }),
-        }
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-struct ErrorResponse {
-    message: String,
-}
 
 fn parse_source_config(settings: &config::Config, grok: &mut grok::Grok) -> Vec<LogSource> {
     if let Ok(array) = settings.get_array("sources") {
@@ -61,38 +37,43 @@ pub fn start_server(settings: &config::Config) {
 
     let server_state = ServerState::new(parse_source_config(&settings, &mut grok), grok);
 
-    actix_web::server::new(move || {
-        vec![
-            actix_web::App::with_state(server_state.clone())
-                .middleware(actix_web::middleware::Logger::default())
-                .prefix("/api/v1")
-                .resource("/health", |r| {
-                    r.get().with(health);
-                    r.head().f(|_| HttpResponse::MethodNotAllowed());
-                })
-                .resource("/sources", |r| {
-                    r.get().with(logsource_port::get_sources);
-                    r.head().f(|_| HttpResponse::MethodNotAllowed());
-                })
-                .resource("/sources/{id}/content", |r| {
-                    r.get()
-                        .filter(actix_web::pred::Header("Accept", "*/*"))
-                        .with(logsource_port::get_source_content_text);
-                    r.get()
-                        .filter(actix_web::pred::Header("Accept", "text/plain"))
-                        .with(logsource_port::get_source_content_text);
-                    r.get()
-                        .filter(actix_web::pred::Header("Accept", "application/json"))
-                        .with(logsource_port::get_source_content_json);
-                    r.get().f(|_| HttpResponse::NotAcceptable());
-                    r.head().f(|_| HttpResponse::MethodNotAllowed());
-                })
-                .boxed(),
-            actix_web::App::new()
-                .middleware(actix_web::middleware::Logger::default())
-                .resource("/index.html", |r| r.f(index))
-                .boxed(),
-        ]
+    actix_web::HttpServer::new(move || {
+        actix_web::App::new()
+            .wrap(middleware::Logger::default())
+            .data(server_state.clone())
+            .service(
+                web::scope("/api/v1")
+                    .default_service(web::route().to(|| HttpResponse::MethodNotAllowed()))
+                    .route("/health", web::get().to_async(health))
+                    .route("/sources", web::get().to_async(logsource_port::get_sources))
+                    .route(
+                        "/sources/{id}/content",
+                        web::get()
+                            .guard(guard::Header("accept", "*/*"))
+                            .to_async(logsource_port::get_source_content_text),
+                    )
+                    .route(
+                        "/sources/{id}/content",
+                        web::get()
+                            .guard(guard::Header("accept", "text/plain"))
+                            .to_async(logsource_port::get_source_content_text),
+                    )
+                    .route(
+                        "/sources/{id}/content",
+                        web::get()
+                            .guard(guard::Header("accept", "application/json"))
+                            .to_async(logsource_port::get_source_content_json),
+                    )
+                    .route(
+                        "/sources/{id}/content",
+                        web::get().to_async(|| HttpResponse::NotAcceptable()),
+                    ),
+            )
+            .service(
+                web::resource("/index.html")
+                    .default_service(web::route().to(|| HttpResponse::MethodNotAllowed()))
+                    .route(web::get().to(index)),
+            )
     })
     .bind(addr)
     .expect(&format!("Failed to bind to {}:{}", ip, port))
@@ -101,49 +82,31 @@ pub fn start_server(settings: &config::Config) {
     println!("Started http server: {:?}", addr);
 }
 
-fn index(_req: &HttpRequest) -> HttpResponse {
-    HttpResponse::Ok().body(Body::Binary(Binary::Slice(WELCOME_MSG.as_ref())))
+fn index(_req: HttpRequest) -> String {
+    WELCOME_MSG.to_string()
 }
 
-fn health(_state: actix_web::State<ServerState>) -> HttpResponse {
+fn health(_state: web::Data<ServerState>) -> HttpResponse {
     HttpResponse::Ok().finish()
 }
 
 #[cfg(test)]
 mod tests {
-    use std;
-
     use actix_web::http;
-    use actix_web::test::TestRequest;
-    use actix_web::Body;
-    use actix_web::FromRequest;
-    use actix_web::State;
+    use actix_web::test;
+    use actix_web::web;
 
     #[test]
     fn test_index_handler() {
-        let resp = TestRequest::with_header("content-type", "text/plain")
-            .execute(&super::index)
-            .unwrap();
-        assert_eq!(resp.status(), http::StatusCode::OK);
-
-        match resp.body() {
-            Body::Binary(binary) => assert_eq!(
-                std::str::from_utf8(binary.as_ref()).unwrap(),
-                super::WELCOME_MSG
-            ),
-            t => assert!(false, format!("Wrong body type {:?}", t)),
-        }
+        let req = test::TestRequest::with_header("content-type", "text/plain").to_http_request();
+        let resp = super::index(req);
+        assert_eq!(resp, super::WELCOME_MSG);
     }
 
     #[test]
     fn test_health_handler() {
-        actix::System::run(|| {
-            let state = super::ServerState::new(vec![], grok::Grok::default());
-            let req = TestRequest::with_state(state).finish();
-            let resp = super::health(State::extract(&req));
-            assert_eq!(resp.status(), http::StatusCode::OK);
-
-            actix::System::current().stop();
-        });
+        let state = super::ServerState::new(vec![], grok::Grok::default());
+        let resp = test::block_on(super::health(web::Data::new(state))).unwrap();
+        assert_eq!(resp.status(), http::StatusCode::OK);
     }
 }
