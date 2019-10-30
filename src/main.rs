@@ -17,7 +17,7 @@ fn init_log(matches: &ArgMatches) {
         1 => "warn",
         2 => "info",
         3 => "debug",
-        _ => "trace"
+        _ => "trace",
     };
 
     let loglevel = match matches.value_of("module") {
@@ -27,7 +27,7 @@ fn init_log(matches: &ArgMatches) {
             module_loglevel.push_str(loglevel);
             module_loglevel
         }
-        _ => String::from(loglevel)
+        _ => String::from(loglevel),
     };
 
     std::env::set_var("RUST_LOG", &loglevel);

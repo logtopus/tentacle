@@ -1,13 +1,13 @@
-use failure::Fail;
+use derive_more::Display;
 use std::sync::Arc;
 
-#[derive(Fail, Debug)]
+#[derive(Debug, Display)]
 pub enum ApplicationError {
     // indicates that a requested log source is not configured
-    #[fail(display = "Source not found")]
+    #[display(fmt = "Source not found")]
     SourceNotFound,
     // indicates that a requested log source is configured but cannot be read
-    #[fail(display = "Failed to read source")]
+    #[display(fmt = "Failed to read source")]
     FailedToReadSource,
 }
 

@@ -8,19 +8,17 @@ description = "Tentacle is the process that provides data for the central logtop
 license = "Apache-2.0"
 
 [dependencies]
-onig_sys = "=69.1.0"
-onig = "=4.3.1"
 actix = "0.8" # actor framework
 actix-web = "1.0" # web serving
 bytes = "0.4"
-clap = "2.32" # parse command line options
+clap = "2.33" # parse command line options
 config = "0.9" # parse config file
+derive_more = "0.15" # more derive macros
 log = "0.4" # logging facade
-env_logger = "0.6" # log implementation
+env_logger = "0.7" # log implementation
 grok = "1.0" # log parsing
 chrono = "0.4" # timestamp parsing
 chrono-tz = "0.5" # timezone parsing
-failure = "0.1"
 futures = "0.1"
 regex = "1"
 serde = "1.0"
@@ -31,7 +29,7 @@ flate2 = "1.0" # decompression
 #filetime = "0.2"
 
 [dev-dependencies]
-lazy_static = "1.3"
+lazy_static = "1.4"
 awc = "0.2" # http client
 
 [package.metadata.rpm.cargo]
