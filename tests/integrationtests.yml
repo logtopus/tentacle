@@ -2,7 +2,7 @@ http.bind.port: 18080
 
 sources:
   - id: itest
-    type: log
+    type: file
     file_pattern: tests/demo\.log(\.(?P<rotation>\d)(\.gz)?)?
     line_pattern: "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:loglevel} %{GREEDYDATA:message}"
     datetime_pattern: "%Y-%m-%d %H:%M:%S"

@@ -3,18 +3,16 @@ extern crate log;
 #[macro_use]
 extern crate serde_derive;
 
-use actix;
-
 use crate::constants::AUTHORS;
 use crate::constants::VERSION;
+use actix;
 
 mod cfg;
 mod constants;
 mod data;
-mod logsource;
 mod logsource_port;
-mod logsource_repo;
 mod logsource_svc;
+mod repository;
 mod server;
 mod state;
 mod util;

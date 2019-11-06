@@ -2,14 +2,17 @@ use crate::data::ApplicationError;
 use crate::data::LinePattern;
 use crate::data::LogFilter;
 use crate::data::ParsedLine;
-use crate::data::StreamEntry;
 use crate::util;
 
+use crate::data::StreamEntry;
+use crate::data::StreamSink;
 use chrono::Datelike;
 use chrono::TimeZone;
 use flate2::read::GzDecoder;
 use futures::sink::Sink;
 use futures::Async;
+use notify;
+use notify::Watcher;
 use regex::Regex;
 use std::cmp::Ordering;
 use std::fs;
@@ -19,10 +22,10 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Lines;
 use std::path::Path;
+use std::sync::mpsc;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::SystemTime;
-
-type StreamSink = futures::sync::mpsc::Sender<StreamEntry>;
 
 enum LinesIter {
     GZIP(Lines<BufReader<GzDecoder<std::fs::File>>>),
@@ -40,24 +43,18 @@ impl Iterator for LinesIter {
     }
 }
 
-pub struct LogSourceRepository {
-    tx: StreamSink,
-}
+pub struct FileRepository;
 
-impl LogSourceRepository {
-    pub fn new(tx: StreamSink) -> Self {
-        LogSourceRepository { tx }
-    }
-
-    pub fn stream_files(
-        &self,
+impl FileRepository {
+    pub fn stream(
         file_pattern: &Regex,
         line_pattern: Arc<LinePattern>,
+        tx: StreamSink,
         logfilter: Arc<LogFilter>,
     ) -> Result<(), ApplicationError> {
-        let result = LogSourceRepository::resolve_files(&file_pattern, logfilter.from_ms);
+        let result = Self::resolve_files(&file_pattern, logfilter.from_ms);
         result.map(|files| {
-            let tx = self.tx.clone();
+            let tx = tx.clone();
             std::thread::spawn(move || {
                 let result = files
                     .iter()
@@ -82,6 +79,25 @@ impl LogSourceRepository {
         match metadata.is_dir() {
             false => Self::start_file_stream(path, &*line_pattern, logfilter, &tx),
             true => Err(ApplicationError::FailedToReadSource),
+        }
+    }
+
+    fn watch(path: &str) -> notify::Result<()> {
+        let (tx, rx) = mpsc::channel();
+
+        // select implementation for platform
+        let mut watcher: notify::RecommendedWatcher =
+            notify::Watcher::new(tx, Duration::from_secs(2))?;
+
+        watcher.watch(path, notify::RecursiveMode::NonRecursive)?;
+
+        // This is a simple loop, but you may want to use more complex logic here,
+        // for example to handle I/O.
+        loop {
+            match rx.recv() {
+                Ok(event) => println!("{:?}", event),
+                Err(e) => println!("watch error: {:?}", e),
+            }
         }
     }
 
@@ -115,7 +131,7 @@ impl LogSourceRepository {
                     match lineresult {
                         Ok(line) => {
                             let parsed_line =
-                                LogSourceRepository::apply_pattern(&line, &line_pattern, year);
+                                FileRepository::apply_pattern(&line, &line_pattern, year);
                             if !logfilter.matches(&parsed_line) {
                                 continue;
                             }
@@ -267,13 +283,13 @@ impl LogSourceRepository {
 
 #[cfg(test)]
 mod tests {
-    use crate::logsource_repo::LogSourceRepository;
+    use crate::repository::filerepo::FileRepository;
     use regex::Regex;
 
     #[test]
     fn test_resolve_files() {
         let regex = Regex::new(r#"tests/demo\.log(\.(?P<rotation>\d)(\.gz)?)?"#).unwrap();
-        let result = LogSourceRepository::resolve_files(&regex, 0).unwrap();
+        let result = FileRepository::resolve_files(&regex, 0).unwrap();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get(0), Some(&"tests/demo.log.2.gz".to_string()));
         assert_eq!(result.get(1), Some(&"tests/demo.log.1".to_string()));

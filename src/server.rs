@@ -9,7 +9,8 @@ use actix_web::HttpResponse;
 use config;
 
 use crate::constants::*;
-use crate::logsource::LogSource;
+use crate::data::LogSource;
+use crate::data::LogSourceBuilder;
 use crate::logsource_port;
 use crate::state::ServerState;
 
@@ -19,7 +20,7 @@ fn parse_source_config(settings: &config::Config, grok: &mut grok::Grok) -> Vec<
             .iter()
             .map(|v| {
                 // let grok = Arc::get_mut(&mut grok).unwrap();
-                LogSource::try_from_config(v, grok).unwrap()
+                LogSourceBuilder::create(v, grok).unwrap()
             })
             .collect()
     } else {

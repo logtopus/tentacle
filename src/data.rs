@@ -1,5 +1,10 @@
+use config;
 use derive_more::Display;
+use grok;
+use regex::Regex;
 use std::sync::Arc;
+
+pub type StreamSink = futures::sync::mpsc::Sender<StreamEntry>;
 
 #[derive(Debug, Display)]
 pub enum ApplicationError {
@@ -56,4 +61,120 @@ pub struct LinePattern {
     pub chrono: Arc<String>,
     pub timezone: chrono_tz::Tz,
     pub syslog_ts: bool, // indicates if the grok pattern is matching a syslog timestamp without year
+}
+
+#[derive(Debug, Clone)]
+pub enum LogSource {
+    File {
+        id: String,
+        file_pattern: Regex,
+        line_pattern: LinePattern,
+    },
+    Journal {
+        id: String,
+        unit: String,
+        line_pattern: LinePattern,
+    },
+}
+
+pub struct LogSourceBuilder;
+
+impl LogSourceBuilder {
+    pub fn create(
+        value: &config::Value,
+        grok: &mut grok::Grok,
+    ) -> Result<LogSource, config::ConfigError> {
+        let file_map = value.clone().into_table()?;
+
+        let id = file_map
+            .get("id")
+            .ok_or(config::ConfigError::NotFound("id".to_string()))?;
+        let id = id.clone().into_str()?;
+        let line_pattern = file_map
+            .get("line_pattern")
+            .ok_or(config::ConfigError::NotFound("line_pattern".to_string()))?
+            .clone()
+            .into_str()?;
+        let grok_pattern = grok.compile(&line_pattern, true).map_err(|e| {
+            error!("{}", e);
+            config::ConfigError::Message("Failed to parse line pattern".to_string())
+        })?;
+        // special case: add year from file time if syslog pattern is used
+        let syslog_ts = if line_pattern.contains("%{SYSLOGTIMESTAMP:timestamp}") {
+            true
+        } else {
+            false
+        };
+
+        let chrono_pattern = file_map
+            .get("datetime_pattern")
+            .ok_or(config::ConfigError::NotFound(
+                "datetime_pattern".to_string(),
+            ))?
+            .clone()
+            .into_str()?;
+        let chrono_pattern = if syslog_ts {
+            format!("%Y {}", chrono_pattern)
+        } else {
+            chrono_pattern
+        };
+
+        let timezone = file_map
+            .get("timezone")
+            .ok_or(config::ConfigError::NotFound("timezone".to_string()))?
+            .clone()
+            .into_str()?;
+        let timezone: chrono_tz::Tz = timezone.parse().unwrap();
+
+        let srctype = file_map
+            .get("type")
+            .ok_or(config::ConfigError::NotFound("type".to_string()))?
+            .clone()
+            .into_str()?;
+
+        let logsource = match srctype.as_ref() {
+            "journal" => {
+                let unit = file_map
+                    .get("unit")
+                    .ok_or(config::ConfigError::NotFound("unit".to_string()))?
+                    .clone()
+                    .into_str()?;
+
+                Ok(LogSource::Journal {
+                    id,
+                    unit,
+                    line_pattern: LinePattern {
+                        raw: line_pattern,
+                        grok: Arc::new(grok_pattern),
+                        chrono: Arc::new(chrono_pattern),
+                        timezone,
+                        syslog_ts,
+                    },
+                })
+            }
+            "file" => {
+                let file_pattern = file_map
+                    .get("file_pattern")
+                    .ok_or(config::ConfigError::NotFound("file_pattern".to_string()))?
+                    .clone()
+                    .into_str()?;
+                let file_pattern = Regex::new(file_pattern.as_ref()).unwrap();
+
+                Ok(LogSource::File {
+                    id,
+                    file_pattern,
+                    line_pattern: LinePattern {
+                        raw: line_pattern,
+                        grok: Arc::new(grok_pattern),
+                        chrono: Arc::new(chrono_pattern),
+                        timezone,
+                        syslog_ts,
+                    },
+                })
+            }
+            e => Err(config::ConfigError::Message(format!("Unknown type: {}", e))),
+        };
+
+        logsource
+    }
 }

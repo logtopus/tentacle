@@ -1,3 +1,5 @@
+use crate::data;
+use crate::data::LogSource;
 use actix_web::error::ResponseError;
 use actix_web::http::header;
 use actix_web::web;
@@ -11,9 +13,6 @@ use std::sync::Arc;
 
 use crate::data::ApplicationError;
 use crate::data::LogFilter;
-use crate::logsource::LogSource;
-use crate::logsource::LogSourceType;
-use crate::logsource_repo::LogSourceRepository;
 use crate::logsource_svc::LogSourceService;
 use crate::state::ServerState;
 
@@ -39,6 +38,12 @@ impl ResponseError for ApplicationError {
     }
 }
 
+#[derive(Serialize, Deserialize, Debug, PartialEq, PartialOrd)]
+pub enum LogSourceType {
+    File,
+    Journal, // see https://docs.rs/systemd/0.0.8/systemd/journal/index.html
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LogSourceRepr {
     pub src_type: LogSourceType,
@@ -57,8 +62,8 @@ pub struct Filter {
     loglevels: Option<String>,
 }
 
-impl From<&LogSource> for LogSourceRepr {
-    fn from(src: &LogSource) -> Self {
+impl From<&data::LogSource> for LogSourceRepr {
+    fn from(src: &data::LogSource) -> Self {
         match src {
             LogSource::File {
                 id,
@@ -66,9 +71,9 @@ impl From<&LogSource> for LogSourceRepr {
                 line_pattern,
             } => LogSourceRepr {
                 src_type: LogSourceType::File,
-                id: id.clone(),
+                id: id.to_string(),
                 line_pattern: Some(line_pattern.raw.clone()),
-                file_pattern: Some(file_pattern.as_str().to_string()),
+                file_pattern: Some(file_pattern.to_string()),
                 unit: None,
             },
             LogSource::Journal {
@@ -77,10 +82,10 @@ impl From<&LogSource> for LogSourceRepr {
                 line_pattern,
             } => LogSourceRepr {
                 src_type: LogSourceType::Journal,
-                id: id.clone(),
+                id: id.to_string(),
                 line_pattern: Some(line_pattern.raw.clone()),
                 file_pattern: None,
-                unit: Some(unit.clone()),
+                unit: Some(unit.to_string()),
             },
         }
     }
@@ -114,47 +119,49 @@ fn get_source_content(
     debug!("Content for source {} requested", id);
 
     let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
-    let reposvc = LogSourceRepository::new(tx);
-    let domainsvc = LogSourceService::new(state.get_ref().clone(), reposvc);
 
-    domainsvc
-        .stream_source_content(id.to_string(), Arc::new(logfilter_from_query(&filter)))
-        .map_err(|e| e.into())
-        .and_then(move |_| {
-            let mut last_ts = 0;
-            futures::future::ok(
-                HttpResponse::Ok()
-                    .content_type(if as_json {
-                        "application/json"
+    LogSourceService::stream_source_content(
+        tx,
+        id.to_string(),
+        state.get_ref().clone(),
+        Arc::new(logfilter_from_query(&filter)),
+    )
+    .map_err(|e| e.into())
+    .and_then(move |_| {
+        let mut last_ts = 0;
+        futures::future::ok(
+            HttpResponse::Ok()
+                .content_type(if as_json {
+                    "application/json"
+                } else {
+                    "text/plain"
+                })
+                .streaming(rx_body.map(move |mut stream_entry| {
+                    if stream_entry.parsed_line.timestamp == 0 {
+                        stream_entry.parsed_line.timestamp = last_ts;
                     } else {
-                        "text/plain"
-                    })
-                    .streaming(rx_body.map(move |mut stream_entry| {
-                        if stream_entry.parsed_line.timestamp == 0 {
-                            stream_entry.parsed_line.timestamp = last_ts;
-                        } else {
-                            last_ts = stream_entry.parsed_line.timestamp;
-                        }
+                        last_ts = stream_entry.parsed_line.timestamp;
+                    }
 
-                        if as_json {
-                            match serde_json::to_vec(&stream_entry.parsed_line) {
-                                Ok(mut vec) => {
-                                    vec.put_u8('\n' as u8);
-                                    Bytes::from(vec)
-                                }
-                                Err(e) => {
-                                    error!("Failed to convert stream entry to json: {}", e);
-                                    Bytes::new()
-                                }
+                    if as_json {
+                        match serde_json::to_vec(&stream_entry.parsed_line) {
+                            Ok(mut vec) => {
+                                vec.put_u8('\n' as u8);
+                                Bytes::from(vec)
                             }
-                        } else {
-                            let mut vec = stream_entry.line.into_bytes();
-                            vec.put_u8('\n' as u8);
-                            Bytes::from(vec)
+                            Err(e) => {
+                                error!("Failed to convert stream entry to json: {}", e);
+                                Bytes::new()
+                            }
                         }
-                    })),
-            )
-        })
+                    } else {
+                        let mut vec = stream_entry.line.into_bytes();
+                        vec.put_u8('\n' as u8);
+                        Bytes::from(vec)
+                    }
+                })),
+        )
+    })
 }
 
 pub fn get_source_content_text(

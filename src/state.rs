@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::logsource::LogSource;
+use crate::data::LogSource;
 use grok::Grok;
 
 pub struct ServerState {

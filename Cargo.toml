@@ -25,6 +25,7 @@ serde = "1.0"
 serde_derive = "1.0"
 serde_json = "1.0"
 flate2 = "1.0" # decompression
+notify = "4.0" # filesystem notification
 #uuid = { version = "0.7", features = ["v4"] }
 #filetime = "0.2"
 
