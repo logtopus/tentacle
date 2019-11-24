@@ -1,14 +1,13 @@
 use crate::data;
 use crate::data::LogSource;
+use crate::data::StreamEntry;
 use actix_web::error::ResponseError;
 use actix_web::http::header;
 use actix_web::web;
 use actix_web::HttpResponse;
 use bytes::BufMut;
 use bytes::Bytes;
-use futures;
-use futures::Future;
-use futures::Stream;
+use futures_01::stream::Stream;
 use std::sync::Arc;
 
 use crate::data::ApplicationError;
@@ -115,36 +114,33 @@ fn get_source_content(
     filter: web::Query<Filter>,
     state: web::Data<ServerState>,
     as_json: bool,
-) -> impl Future<Item = HttpResponse, Error = actix_web::Error> {
+) -> HttpResponse {
     debug!("Content for source {} requested", id);
 
-    let (tx, rx_body) = futures::sync::mpsc::channel(1024 * 1024);
-
-    LogSourceService::stream_source_content(
-        tx,
+    let stream_result = LogSourceService::create_content_stream(
         id.to_string(),
         state.get_ref().clone(),
-        Arc::new(logfilter_from_query(&filter)),
-    )
-    .map_err(|e| e.into())
-    .and_then(move |_| {
-        let mut last_ts = 0;
-        futures::future::ok(
-            HttpResponse::Ok()
-                .content_type(if as_json {
-                    "application/json"
-                } else {
-                    "text/plain"
-                })
-                .streaming(rx_body.map(move |mut stream_entry| {
-                    if stream_entry.parsed_line.timestamp == 0 {
-                        stream_entry.parsed_line.timestamp = last_ts;
-                    } else {
-                        last_ts = stream_entry.parsed_line.timestamp;
-                    }
+        &Arc::new(logfilter_from_query(&filter)),
+    );
 
+    match stream_result {
+        Ok(stream) => {
+            let mut last_ts = 0;
+
+            let compat = futures::compat::Compat::new(stream);
+            let mapped_stream = compat.map(move |stream_entry| match stream_entry {
+                StreamEntry::LogLine {
+                    line,
+                    mut parsed_line,
+                } => {
                     if as_json {
-                        match serde_json::to_vec(&stream_entry.parsed_line) {
+                        if parsed_line.timestamp == 0 {
+                            parsed_line.timestamp = last_ts;
+                        } else {
+                            last_ts = parsed_line.timestamp;
+                        }
+
+                        match serde_json::to_vec(&parsed_line) {
                             Ok(mut vec) => {
                                 vec.put_u8('\n' as u8);
                                 Bytes::from(vec)
@@ -155,20 +151,30 @@ fn get_source_content(
                             }
                         }
                     } else {
-                        let mut vec = stream_entry.line.into_bytes();
+                        let mut vec = line.into_bytes();
                         vec.put_u8('\n' as u8);
                         Bytes::from(vec)
                     }
-                })),
-        )
-    })
+                }
+            });
+
+            HttpResponse::Ok()
+                .content_type(if as_json {
+                    "application/json"
+                } else {
+                    "text/plain"
+                })
+                .streaming(mapped_stream)
+        }
+        Err(e) => e.error_response(),
+    }
 }
 
 pub fn get_source_content_text(
     id: web::Path<String>,
     filter: web::Query<Filter>,
     state: web::Data<ServerState>,
-) -> impl Future<Item = HttpResponse, Error = actix_web::Error> {
+) -> HttpResponse {
     get_source_content(id, filter, state, false)
 }
 
@@ -176,7 +182,7 @@ pub fn get_source_content_json(
     id: web::Path<String>,
     filter: web::Query<Filter>,
     state: web::Data<ServerState>,
-) -> impl Future<Item = HttpResponse, Error = actix_web::Error> {
+) -> HttpResponse {
     get_source_content(id, filter, state, true)
 }
 

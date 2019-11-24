@@ -1,10 +1,9 @@
 use config;
 use derive_more::Display;
+use futures::stream::LocalBoxStream;
 use grok;
 use regex::Regex;
 use std::sync::Arc;
-
-pub type StreamSink = futures::sync::mpsc::Sender<StreamEntry>;
 
 #[derive(Debug, Display)]
 pub enum ApplicationError {
@@ -24,10 +23,14 @@ pub struct ParsedLine {
 }
 
 #[derive(Debug)]
-pub struct StreamEntry {
-    pub line: String,
-    pub parsed_line: ParsedLine,
+pub enum StreamEntry {
+    LogLine {
+        line: String,
+        parsed_line: ParsedLine,
+    },
 }
+
+pub type LogStream = LocalBoxStream<'static, Result<StreamEntry, ApplicationError>>;
 
 #[derive(Debug)]
 pub struct LogFilter {

@@ -4,7 +4,7 @@ extern crate lazy_static;
 use awc;
 
 use actix_web::http::StatusCode;
-use futures::Future;
+use futures_01::Future;
 use std::sync::Arc;
 use std::sync::RwLock;
 use std::sync::Weak;

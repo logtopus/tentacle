@@ -1,16 +1,18 @@
 use crate::data::ApplicationError;
 use crate::data::LinePattern;
 use crate::data::LogFilter;
+use crate::data::LogStream;
 use crate::data::ParsedLine;
-use crate::util;
-
 use crate::data::StreamEntry;
-use crate::data::StreamSink;
+use crate::util;
 use chrono::Datelike;
 use chrono::TimeZone;
+use core::pin::Pin;
 use flate2::read::GzDecoder;
-use futures::sink::Sink;
-use futures::Async;
+use futures::stream::Stream;
+use futures::task::Context;
+use futures::task::Poll;
+use futures_util::stream::StreamExt;
 use notify;
 use notify::Watcher;
 use regex::Regex;
@@ -43,43 +45,153 @@ impl Iterator for LinesIter {
     }
 }
 
+struct FileLogStream {
+    path: String,
+    line_pattern: Arc<LinePattern>,
+    logfilter: Arc<LogFilter>,
+    lines_iter: Option<LinesIter>,
+    year: i32,
+}
+
+impl FileLogStream {
+    fn new(path: &str, line_pattern: &Arc<LinePattern>, logfilter: &Arc<LogFilter>) -> Self {
+        FileLogStream {
+            path: path.to_owned(),
+            line_pattern: line_pattern.clone(),
+            logfilter: logfilter.clone(),
+            lines_iter: None,
+            year: 0,
+        }
+    }
+
+    fn apply_pattern(line: &str, line_pattern: &LinePattern, year: i32) -> ParsedLine {
+        let maybe_matches = line_pattern.grok.match_against(&line);
+        if let Some(matches) = maybe_matches {
+            let timestamp = matches
+                .get("timestamp")
+                .map(|ts| {
+                    let parse_result = if line_pattern.syslog_ts {
+                        let ts_w_year = format!("{} {}", year, ts);
+                        chrono::NaiveDateTime::parse_from_str(&ts_w_year, &line_pattern.chrono)
+                    } else {
+                        chrono::NaiveDateTime::parse_from_str(&ts, &line_pattern.chrono)
+                    };
+                    parse_result
+                        .map(|ndt| {
+                            line_pattern
+                                .timezone
+                                .from_local_datetime(&ndt)
+                                .single()
+                                .map(|dt| {
+                                    dt.timestamp() as u128 * 1000
+                                        + (dt.timestamp_subsec_millis() as u128)
+                                })
+                                .unwrap_or(0)
+                        })
+                        .unwrap_or(0)
+                })
+                .unwrap_or(0);
+            ParsedLine {
+                timestamp,
+                loglevel: matches.get("loglevel").map(|s| s.to_string()),
+                message: matches.get("message").unwrap_or("").to_string(),
+            }
+        } else {
+            ParsedLine {
+                timestamp: 0,
+                loglevel: None,
+                message: format!("Failed to parse: {}", line),
+            }
+        }
+    }
+
+    fn next_line(&mut self) -> Poll<Option<Result<StreamEntry, ApplicationError>>> {
+        let lines_iter = self.lines_iter.as_mut();
+        let lines_iter = lines_iter.unwrap(); // should panic, if this is called with None option
+        let nextline = lines_iter.next();
+        match nextline {
+            Some(lineresult) => match lineresult {
+                Ok(line) => {
+                    let parsed_line =
+                        FileLogStream::apply_pattern(&line, &self.line_pattern, self.year);
+                    if !self.logfilter.matches(&parsed_line) {
+                        Poll::Pending
+                    } else {
+                        Poll::Ready(Some(Ok(StreamEntry::LogLine { line, parsed_line })))
+                    }
+                }
+                Err(e) => {
+                    error!("Stream error: {:?}", e);
+                    Poll::Ready(None)
+                }
+            },
+            None => Poll::Ready(None),
+        }
+    }
+}
+
+impl Stream for FileLogStream {
+    type Item = Result<StreamEntry, ApplicationError>;
+
+    fn poll_next(self: Pin<&mut Self>, _ctx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        let mut inner_self = self.get_mut();
+        match &mut inner_self.lines_iter {
+            Some(_) => inner_self.next_line(),
+            None => {
+                inner_self.year = std::fs::metadata(&inner_self.path)
+                    .map(|meta| meta.modified())
+                    .map(|maybe_time| {
+                        maybe_time
+                            .map(|systime| util::system_time_to_date_time(systime).year())
+                            .unwrap_or(0)
+                    })
+                    .unwrap_or(0);
+                match std::fs::File::open(&inner_self.path) {
+                    Ok(file) => {
+                        let lines_iter = if inner_self.path.ends_with(".gz") {
+                            LinesIter::GZIP(BufReader::new(GzDecoder::new(file)).lines())
+                        } else {
+                            LinesIter::PLAIN(BufReader::new(file).lines())
+                        };
+                        inner_self.lines_iter = Some(lines_iter);
+                        inner_self.next_line()
+                    }
+                    Err(e) => {
+                        error!("Stream error: {:?}", e);
+                        Poll::Ready(None)
+                    }
+                }
+            }
+        }
+    }
+}
+
 pub struct FileRepository;
 
 impl FileRepository {
-    pub fn stream(
+    pub fn create_stream(
         file_pattern: &Regex,
-        line_pattern: Arc<LinePattern>,
-        tx: StreamSink,
-        logfilter: Arc<LogFilter>,
-    ) -> Result<(), ApplicationError> {
-        let result = Self::resolve_files(&file_pattern, logfilter.from_ms);
-        result.map(|files| {
-            let tx = tx.clone();
-            std::thread::spawn(move || {
-                let result = files
-                    .iter()
-                    .map(|file| {
-                        Self::stream_file(file, line_pattern.clone(), logfilter.clone(), &tx)
-                    })
-                    .collect::<Result<Vec<_>, ApplicationError>>();
-                result
-            });
-            ()
-        })
-    }
+        line_pattern: &Arc<LinePattern>,
+        logfilter: &Arc<LogFilter>,
+    ) -> Result<LogStream, ApplicationError> {
+        let files = Self::resolve_files(&file_pattern, logfilter.from_ms)?;
+        let streams = files
+            .iter()
+            .map(|file| {
+                let metadata =
+                    fs::metadata(&file).map_err(|_| ApplicationError::FailedToReadSource);
 
-    fn stream_file(
-        path: &str,
-        line_pattern: Arc<LinePattern>,
-        logfilter: Arc<LogFilter>,
-        tx: &StreamSink,
-    ) -> Result<(), ApplicationError> {
-        let metadata = fs::metadata(&path).map_err(|_| ApplicationError::FailedToReadSource)?;
+                match metadata {
+                    Ok(meta) if !meta.is_dir() => {
+                        Ok(FileLogStream::new(&file, &line_pattern, &logfilter))
+                    }
+                    _ => Err(ApplicationError::FailedToReadSource),
+                }
+            })
+            .collect::<Result<Vec<_>, ApplicationError>>()?;
 
-        match metadata.is_dir() {
-            false => Self::start_file_stream(path, &*line_pattern, logfilter, &tx),
-            true => Err(ApplicationError::FailedToReadSource),
-        }
+        let fullstream = futures::stream::iter(streams).flatten();
+        Ok(fullstream.boxed_local())
     }
 
     fn watch(path: &str) -> notify::Result<()> {
@@ -99,74 +211,6 @@ impl FileRepository {
                 Err(e) => println!("watch error: {:?}", e),
             }
         }
-    }
-
-    fn start_file_stream(
-        path: &str,
-        line_pattern: &LinePattern,
-        logfilter: Arc<LogFilter>,
-        tx: &StreamSink,
-    ) -> Result<(), ApplicationError> {
-        let file = std::fs::File::open(&path);
-        let year = std::fs::metadata(&path)
-            .map(|meta| meta.modified())
-            .map(|maybe_time| {
-                maybe_time
-                    .map(|systime| util::system_time_to_date_time(systime).year())
-                    .unwrap_or(0)
-            })
-            .unwrap_or(0);
-        let line_pattern = line_pattern.clone();
-        let logfilter = logfilter.clone();
-        let mut tx = tx.clone();
-
-        file.map_err(|_| ApplicationError::FailedToReadSource)
-            .map(|f| {
-                let lines: LinesIter = if path.ends_with(".gz") {
-                    LinesIter::GZIP(BufReader::new(GzDecoder::new(f)).lines())
-                } else {
-                    LinesIter::PLAIN(BufReader::new(f).lines())
-                };
-                for lineresult in lines {
-                    match lineresult {
-                        Ok(line) => {
-                            let parsed_line =
-                                FileRepository::apply_pattern(&line, &line_pattern, year);
-                            if !logfilter.matches(&parsed_line) {
-                                continue;
-                            }
-                            match tx.poll_ready() {
-                                Ok(Async::Ready(_)) => {
-                                    if let Err(e) = tx.start_send(StreamEntry { line, parsed_line })
-                                    {
-                                        error!("Stream error: {:?}", e);
-                                        break;
-                                    };
-                                }
-                                Ok(Async::NotReady) => {
-                                    if let Err(e) = tx.poll_complete() {
-                                        error!("Stream error: {:?}", e);
-                                        break;
-                                    };
-                                    if let Err(e) = tx.start_send(StreamEntry { line, parsed_line })
-                                    {
-                                        error!("Stream error: {:?}", e);
-                                        break;
-                                    };
-                                }
-                                Err(e) => {
-                                    error!("Stream error: {:?}", e);
-                                    break;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!("Stream error: {:?}", e);
-                            break;
-                        }
-                    }
-                }
-            })
     }
 
     fn resolve_files(file_pattern: &Regex, from_ms: u128) -> Result<Vec<String>, ApplicationError> {
@@ -237,47 +281,6 @@ impl FileRepository {
             ord => ord,
         });
         Ok(vec.into_iter().map(|(p, _)| p).collect())
-    }
-
-    fn apply_pattern(line: &str, line_pattern: &LinePattern, year: i32) -> ParsedLine {
-        let maybe_matches = line_pattern.grok.match_against(&line);
-        if let Some(matches) = maybe_matches {
-            let timestamp = matches
-                .get("timestamp")
-                .map(|ts| {
-                    let parse_result = if line_pattern.syslog_ts {
-                        let ts_w_year = format!("{} {}", year, ts);
-                        chrono::NaiveDateTime::parse_from_str(&ts_w_year, &line_pattern.chrono)
-                    } else {
-                        chrono::NaiveDateTime::parse_from_str(&ts, &line_pattern.chrono)
-                    };
-                    parse_result
-                        .map(|ndt| {
-                            line_pattern
-                                .timezone
-                                .from_local_datetime(&ndt)
-                                .single()
-                                .map(|dt| {
-                                    dt.timestamp() as u128 * 1000
-                                        + (dt.timestamp_subsec_millis() as u128)
-                                })
-                                .unwrap_or(0)
-                        })
-                        .unwrap_or(0)
-                })
-                .unwrap_or(0);
-            ParsedLine {
-                timestamp,
-                loglevel: matches.get("loglevel").map(|s| s.to_string()),
-                message: matches.get("message").unwrap_or("").to_string(),
-            }
-        } else {
-            ParsedLine {
-                timestamp: 0,
-                loglevel: None,
-                message: format!("Failed to parse: {}", line),
-            }
-        }
     }
 }
 

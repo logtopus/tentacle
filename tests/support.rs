@@ -4,7 +4,7 @@ extern crate futures;
 
 use actix_web::client::ClientRequest;
 use actix_web::http::StatusCode;
-use futures::Future;
+use futures_01::Future;
 use std::panic;
 use std::thread;
 use std::time::Duration;
@@ -19,7 +19,7 @@ pub enum TestError {
 
 pub fn run_with_retries<R, I, F>(request: &R, retries: i32, failmsg: &'static str) -> ()
 where
-    F: futures::Future<Item = I, Error = TestError>,
+    F: Future<Item = I, Error = TestError>,
     R: Fn() -> F,
 {
     let mut retries = retries;
@@ -64,7 +64,7 @@ where
 pub fn http_request(
     req: ClientRequest,
     expected_status: StatusCode,
-) -> impl futures::Future<Item = String, Error = TestError> {
+) -> impl Future<Item = String, Error = TestError> {
     req.send()
         .map_err(|_| TestError::Retry)
         .map(move |mut r| {

@@ -19,7 +19,8 @@ env_logger = "0.7" # log implementation
 grok = "1.0" # log parsing
 chrono = "0.4" # timestamp parsing
 chrono-tz = "0.5" # timezone parsing
-futures = "0.1"
+futures = { version = "0.3", features = ["compat"] }
+futures-util = "0.3" # combinators
 regex = "1"
 serde = "1.0"
 serde_derive = "1.0"
@@ -28,6 +29,10 @@ flate2 = "1.0" # decompression
 notify = "4.0" # filesystem notification
 #uuid = { version = "0.7", features = ["v4"] }
 #filetime = "0.2"
+
+[dependencies.futures_01]
+version = "0.1.25"
+package = "futures"
 
 [dev-dependencies]
 lazy_static = "1.4"
