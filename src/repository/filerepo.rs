@@ -108,25 +108,24 @@ impl FileLogStream {
     fn next_line(&mut self) -> Poll<Option<Result<StreamEntry, ApplicationError>>> {
         let lines_iter = self.lines_iter.as_mut();
         let lines_iter = lines_iter.unwrap(); // should panic, if this is called with None option
-        let nextline = lines_iter.next();
-        match nextline {
-            Some(lineresult) => match lineresult {
+        while let Some(nextline) = lines_iter.next() {
+            match nextline {
                 Ok(line) => {
                     let parsed_line =
                         FileLogStream::apply_pattern(&line, &self.line_pattern, self.year);
                     if !self.logfilter.matches(&parsed_line) {
-                        Poll::Pending
+                        continue;
                     } else {
-                        Poll::Ready(Some(Ok(StreamEntry::LogLine { line, parsed_line })))
+                        return Poll::Ready(Some(Ok(StreamEntry::LogLine { line, parsed_line })));
                     }
                 }
                 Err(e) => {
                     error!("Stream error: {:?}", e);
-                    Poll::Ready(None)
+                    break;
                 }
-            },
-            None => Poll::Ready(None),
+            }
         }
+        Poll::Ready(None)
     }
 }
 

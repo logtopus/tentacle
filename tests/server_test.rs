@@ -97,9 +97,7 @@ fn itest_get_source_content_api_with_logfilter() {
                     .header("User-Agent", "Actix-web")
                     .header("Accept", "*/*")
                     .timeout(std::time::Duration::from_millis(1000));
-
                     support::http_request(req, StatusCode::OK).map(|s| {
-                        dbg!(&s);
                         assert_eq!(
                             s,
                             r#"2019-01-01 08:00:02 DEBUG demo2line2
@@ -125,6 +123,7 @@ fn setup() -> Arc<ProcessHolder> {
         None => {
             let exe = support::binary("tentacle").unwrap();
             let process = std::process::Command::new(exe)
+                // .arg("-vvv")
                 .arg("--config=tests/integrationtests.yml")
                 .spawn()
                 .expect("Failed to run server");
