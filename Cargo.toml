@@ -13,7 +13,7 @@ actix-web = "1.0" # web serving
 bytes = "0.4"
 clap = "2.33" # parse command line options
 config = "0.9" # parse config file
-derive_more = "0.15" # more derive macros
+derive_more = "0.99" # more derive macros
 log = "0.4" # logging facade
 env_logger = "0.7" # log implementation
 grok = "1.0" # log parsing
@@ -31,7 +31,7 @@ notify = "4.0" # filesystem notification
 #filetime = "0.2"
 
 [dependencies.futures_01]
-version = "0.1.25"
+version = "0.1.29"
 package = "futures"
 
 [dev-dependencies]
