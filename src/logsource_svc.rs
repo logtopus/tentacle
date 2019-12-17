@@ -1,5 +1,5 @@
 use crate::data::ApplicationError;
-use crate::data::LogFilter;
+use crate::data::LogQueryContext;
 use crate::data::LogSource;
 use crate::data::LogStream;
 use crate::repository::FileRepository;
@@ -12,7 +12,7 @@ impl LogSourceService {
     pub fn create_content_stream(
         id: String,
         state: state::ServerState,
-        logfilter: &Arc<LogFilter>,
+        logfilter: &Arc<LogQueryContext>,
     ) -> Result<LogStream, ApplicationError> {
         let state = state.clone();
 

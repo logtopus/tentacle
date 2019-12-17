@@ -33,12 +33,13 @@ pub enum StreamEntry {
 pub type LogStream = LocalBoxStream<'static, Result<StreamEntry, ApplicationError>>;
 
 #[derive(Debug)]
-pub struct LogFilter {
+pub struct LogQueryContext {
     pub from_ms: u128,
     pub loglevels: Option<Vec<String>>,
+    pub watch: Option<bool>,
 }
 
-impl LogFilter {
+impl LogQueryContext {
     /// Check the filter against the log line.
     /// If the logline matches the filter and should be included within the output
     /// the this returns true.

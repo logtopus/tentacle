@@ -11,7 +11,7 @@ use futures_01::stream::Stream;
 use std::sync::Arc;
 
 use crate::data::ApplicationError;
-use crate::data::LogFilter;
+use crate::data::LogQueryContext;
 use crate::logsource_svc::LogSourceService;
 use crate::state::ServerState;
 
@@ -56,9 +56,10 @@ pub struct LogSourceRepr {
 }
 
 #[derive(Deserialize)]
-pub struct Filter {
+pub struct QueryParameters {
     from_ms: Option<i64>,
     loglevels: Option<String>,
+    watch: Option<bool>,
 }
 
 impl From<&data::LogSource> for LogSourceRepr {
@@ -99,19 +100,20 @@ pub fn get_sources(state: web::Data<ServerState>) -> HttpResponse {
     HttpResponse::Ok().json(dto)
 }
 
-fn logfilter_from_query(filter: &Filter) -> LogFilter {
-    LogFilter {
-        from_ms: filter.from_ms.map(|dt| dt as u128).unwrap_or(0),
-        loglevels: filter
+fn logfilter_from_query(parameters: &QueryParameters) -> LogQueryContext {
+    LogQueryContext {
+        from_ms: parameters.from_ms.map(|dt| dt as u128).unwrap_or(0),
+        loglevels: parameters
             .loglevels
             .clone()
             .map(|s| s.split(",").map(|s| s.to_string()).collect()),
+        watch: parameters.watch,
     }
 }
 
 fn get_source_content(
     id: web::Path<String>,
-    filter: web::Query<Filter>,
+    filter: web::Query<QueryParameters>,
     state: web::Data<ServerState>,
     as_json: bool,
 ) -> HttpResponse {
@@ -172,7 +174,7 @@ fn get_source_content(
 
 pub fn get_source_content_text(
     id: web::Path<String>,
-    filter: web::Query<Filter>,
+    filter: web::Query<QueryParameters>,
     state: web::Data<ServerState>,
 ) -> HttpResponse {
     get_source_content(id, filter, state, false)
@@ -180,7 +182,7 @@ pub fn get_source_content_text(
 
 pub fn get_source_content_json(
     id: web::Path<String>,
-    filter: web::Query<Filter>,
+    filter: web::Query<QueryParameters>,
     state: web::Data<ServerState>,
 ) -> HttpResponse {
     get_source_content(id, filter, state, true)

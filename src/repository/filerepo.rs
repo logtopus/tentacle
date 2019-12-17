@@ -1,6 +1,6 @@
 use crate::data::ApplicationError;
 use crate::data::LinePattern;
-use crate::data::LogFilter;
+use crate::data::LogQueryContext;
 use crate::data::LogStream;
 use crate::data::ParsedLine;
 use crate::data::StreamEntry;
@@ -13,8 +13,6 @@ use futures::stream::Stream;
 use futures::task::Context;
 use futures::task::Poll;
 use futures_util::stream::StreamExt;
-use notify;
-use notify::Watcher;
 use regex::Regex;
 use std::cmp::Ordering;
 use std::fs;
@@ -24,9 +22,7 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::io::Lines;
 use std::path::Path;
-use std::sync::mpsc;
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::SystemTime;
 
 enum LinesIter {
@@ -48,20 +44,27 @@ impl Iterator for LinesIter {
 struct FileLogStream {
     path: String,
     line_pattern: Arc<LinePattern>,
-    logfilter: Arc<LogFilter>,
+    context: Arc<LogQueryContext>,
     lines_iter: Option<LinesIter>,
     year: i32,
+    watch: bool,
 }
 
 impl FileLogStream {
-    fn new(path: &str, line_pattern: &Arc<LinePattern>, logfilter: &Arc<LogFilter>) -> Self {
+    fn new(path: &str, line_pattern: &Arc<LinePattern>, context: &Arc<LogQueryContext>) -> Self {
         FileLogStream {
             path: path.to_owned(),
             line_pattern: line_pattern.clone(),
-            logfilter: logfilter.clone(),
+            context: context.clone(),
             lines_iter: None,
             year: 0,
+            watch: false,
         }
+    }
+
+    fn with_watch(mut self) -> Self {
+        self.watch = true;
+        self
     }
 
     fn apply_pattern(line: &str, line_pattern: &LinePattern, year: i32) -> ParsedLine {
@@ -113,7 +116,7 @@ impl FileLogStream {
                 Ok(line) => {
                     let parsed_line =
                         FileLogStream::apply_pattern(&line, &self.line_pattern, self.year);
-                    if !self.logfilter.matches(&parsed_line) {
+                    if !self.context.matches(&parsed_line) {
                         continue;
                     } else {
                         return Poll::Ready(Some(Ok(StreamEntry::LogLine { line, parsed_line })));
@@ -125,7 +128,12 @@ impl FileLogStream {
                 }
             }
         }
-        Poll::Ready(None)
+
+        if self.watch {
+            Poll::Pending // why is this awakened?
+        } else {
+            Poll::Ready(None)
+        }
     }
 }
 
@@ -171,45 +179,37 @@ impl FileRepository {
     pub fn create_stream(
         file_pattern: &Regex,
         line_pattern: &Arc<LinePattern>,
-        logfilter: &Arc<LogFilter>,
+        context: &Arc<LogQueryContext>,
     ) -> Result<LogStream, ApplicationError> {
-        let files = Self::resolve_files(&file_pattern, logfilter.from_ms)?;
-        let streams = files
-            .iter()
-            .map(|file| {
-                let metadata =
-                    fs::metadata(&file).map_err(|_| ApplicationError::FailedToReadSource);
+        let files = Self::resolve_files(&file_pattern, context.from_ms)?;
+        let mut peekable_iter = files.iter().peekable();
+        let mut streams = Vec::<FileLogStream>::new();
 
-                match metadata {
-                    Ok(meta) if !meta.is_dir() => {
-                        Ok(FileLogStream::new(&file, &line_pattern, &logfilter))
-                    }
-                    _ => Err(ApplicationError::FailedToReadSource),
+        while let Some(file) = peekable_iter.next() {
+            let metadata = fs::metadata(&file).map_err(|_| ApplicationError::FailedToReadSource);
+
+            let stream = match metadata {
+                Ok(meta) if !meta.is_dir() => {
+                    let fstream = FileLogStream::new(&file, &line_pattern, &context);
+                    // for the last file, add a watch flag if requested
+                    let fstream = if let Some(true) = context.watch {
+                        if let None = peekable_iter.peek() {
+                            fstream.with_watch()
+                        } else {
+                            fstream
+                        }
+                    } else {
+                        fstream
+                    };
+                    Ok(fstream)
                 }
-            })
-            .collect::<Result<Vec<_>, ApplicationError>>()?;
+                _ => Err(ApplicationError::FailedToReadSource),
+            }?;
+            streams.push(stream);
+        }
 
         let fullstream = futures::stream::iter(streams).flatten();
         Ok(fullstream.boxed_local())
-    }
-
-    fn watch(path: &str) -> notify::Result<()> {
-        let (tx, rx) = mpsc::channel();
-
-        // select implementation for platform
-        let mut watcher: notify::RecommendedWatcher =
-            notify::Watcher::new(tx, Duration::from_secs(2))?;
-
-        watcher.watch(path, notify::RecursiveMode::NonRecursive)?;
-
-        // This is a simple loop, but you may want to use more complex logic here,
-        // for example to handle I/O.
-        loop {
-            match rx.recv() {
-                Ok(event) => println!("{:?}", event),
-                Err(e) => println!("watch error: {:?}", e),
-            }
-        }
     }
 
     fn resolve_files(file_pattern: &Regex, from_ms: u128) -> Result<Vec<String>, ApplicationError> {

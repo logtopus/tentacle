@@ -6,7 +6,7 @@ The daemon which provides data to the logtopus server
 ## Building from source
 
 1. Install the Rust toolchain (stable) using `rustup` see [Installation](https://doc.rust-lang.org/book/second-edition/ch01-01-installation.html)
-    * build has been tested with at least Rust 1.33
+    * build has been tested with at least Rust 1.39
 
 2. Run `cargo build` or `cargo build --release`
 
