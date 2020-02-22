@@ -4,7 +4,9 @@ extern crate futures;
 
 use actix_web::client::ClientRequest;
 use actix_web::http::StatusCode;
-use futures_01::Future;
+use futures::future::Future;
+use futures::FutureExt;
+use futures::TryFutureExt;
 use std::panic;
 use std::thread;
 use std::time::Duration;
@@ -17,15 +19,15 @@ pub enum TestError {
     Fail,
 }
 
-pub fn run_with_retries<R, I, F>(request: &R, retries: i32, failmsg: &'static str) -> ()
+pub async fn run_with_retries<R, I, F>(request: &R, retries: i32, failmsg: &'static str) -> ()
 where
-    F: Future<Item = I, Error = TestError>,
+    F: Future<Output = Result<I, TestError>>,
     R: Fn() -> F,
 {
     let mut retries = retries;
     while retries >= 0 {
         // exec at least once
-        match actix_web::test::block_fn(request) {
+        match request().await {
             Ok(_) => break,
             Err(TestError::Fail) => assert!(false, failmsg),
             Err(TestError::Retry) => {
@@ -61,35 +63,27 @@ where
     result.unwrap();
 }
 
-pub fn http_request(
+pub async fn http_request(
     req: ClientRequest,
     expected_status: StatusCode,
-) -> impl Future<Item = String, Error = TestError> {
+) -> impl Future<Output = Result<String, TestError>> {
     req.send()
-        .map_err(|_| TestError::Retry)
-        .map(move |mut r| {
+        .map_ok(move |mut r| {
             assert_eq!(
                 r.status(),
                 expected_status,
                 "Query failed with error code {}",
                 r.status()
             );
-            r.body()
+            r.body().map_err(|_| TestError::Retry)
         })
-        .map(|body| {
-            body.map_err(|e| {
-                assert!(false, e);
-                TestError::Fail
-            })
-            .map(|bytes| {
+        .map_err(|_| TestError::Retry)
+        .and_then(|body| {
+            body.map_ok(move |bytes| {
                 std::str::from_utf8(&bytes)
-                    .map_err(|e| {
-                        assert!(false, e);
-                        TestError::Fail
-                    })
+                    .map_err(|_| TestError::Retry)
                     .map(|s| s.to_string())
             })
-            .and_then(|r| r) // flatten result
         })
-        .and_then(|r| r) // flatten result
+        .and_then(|s| futures::future::ready(s))
 }

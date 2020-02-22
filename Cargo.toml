@@ -8,18 +8,19 @@ description = "Tentacle is the process that provides data for the central logtop
 license = "Apache-2.0"
 
 [dependencies]
-actix = "0.8" # actor framework
-actix-web = "1.0" # web serving
-bytes = "0.4"
+actix = "0.9" # actor framework
+actix-web = "2" # web serving
+actix-rt = "1.0.0"
+bytes = "0.5"
 clap = "2.33" # parse command line options
-config = "0.9" # parse config file
-derive_more = "0.99" # more derive macros
+config = "0.10" # parse config file
+derive_more = "^0" # more derive macros
 log = "0.4" # logging facade
 env_logger = "0.7" # log implementation
 grok = "1.0" # log parsing
 chrono = "0.4" # timestamp parsing
 chrono-tz = "0.5" # timezone parsing
-futures = { version = "0.3", features = ["compat"] }
+futures = { version = "0.3" } #, features = ["compat"] }
 futures-util = "0.3" # combinators
 regex = "1"
 serde = "1.0"
@@ -30,13 +31,13 @@ flate2 = "1.0" # decompression
 #uuid = { version = "0.7", features = ["v4"] }
 #filetime = "0.2"
 
-[dependencies.futures_01]
-version = "0.1.29"
-package = "futures"
+#[dependencies.futures_01]
+#version = "0.1.29"
+#package = "futures"
 
 [dev-dependencies]
 lazy_static = "1.4"
-awc = "0.2" # http client
+awc = "1" # http client
 
 [package.metadata.rpm.cargo]
 buildflags = ["--release"]

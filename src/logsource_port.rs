@@ -7,7 +7,7 @@ use actix_web::web;
 use actix_web::HttpResponse;
 use bytes::BufMut;
 use bytes::Bytes;
-use futures_01::stream::Stream;
+use futures::stream::StreamExt;
 use std::sync::Arc;
 
 use crate::data::ApplicationError;
@@ -129,12 +129,11 @@ fn get_source_content(
         Ok(stream) => {
             let mut last_ts = 0;
 
-            let compat = futures::compat::Compat::new(stream);
-            let mapped_stream = compat.map(move |stream_entry| match stream_entry {
-                StreamEntry::LogLine {
+            let mapped_stream = stream.map(move |stream_entry| match stream_entry {
+                Ok(StreamEntry::LogLine {
                     line,
                     mut parsed_line,
-                } => {
+                }) => {
                     if as_json {
                         if parsed_line.timestamp == 0 {
                             parsed_line.timestamp = last_ts;
@@ -145,18 +144,22 @@ fn get_source_content(
                         match serde_json::to_vec(&parsed_line) {
                             Ok(mut vec) => {
                                 vec.put_u8('\n' as u8);
-                                Bytes::from(vec)
+                                Ok(Bytes::from(vec))
                             }
                             Err(e) => {
                                 error!("Failed to convert stream entry to json: {}", e);
-                                Bytes::new()
+                                Err(ApplicationError::FailedToReadSource) // TODO json error //Bytes::new()
                             }
                         }
                     } else {
                         let mut vec = line.into_bytes();
                         vec.put_u8('\n' as u8);
-                        Bytes::from(vec)
+                        Ok(Bytes::from(vec))
                     }
+                }
+                Err(e) => {
+                    error!("Stream failed: {}", e);
+                    Err(e) //Bytes::new()
                 }
             });
 

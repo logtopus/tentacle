@@ -45,29 +45,29 @@ pub fn start_server(settings: &config::Config) {
             .service(
                 web::scope("/api/v1")
                     .default_service(web::route().to(|| HttpResponse::MethodNotAllowed()))
-                    .route("/health", web::get().to_async(health))
-                    .route("/sources", web::get().to_async(logsource_port::get_sources))
+                    .route("/health", web::get().to(health))
+                    .route("/sources", web::get().to(logsource_port::get_sources))
                     .route(
                         "/sources/{id}/content",
                         web::get()
                             .guard(guard::Header("accept", "*/*"))
-                            .to_async(logsource_port::get_source_content_text),
+                            .to(logsource_port::get_source_content_text),
                     )
                     .route(
                         "/sources/{id}/content",
                         web::get()
                             .guard(guard::Header("accept", "text/plain"))
-                            .to_async(logsource_port::get_source_content_text),
+                            .to(logsource_port::get_source_content_text),
                     )
                     .route(
                         "/sources/{id}/content",
                         web::get()
                             .guard(guard::Header("accept", "application/json"))
-                            .to_async(logsource_port::get_source_content_json),
+                            .to(logsource_port::get_source_content_json),
                     )
                     .route(
                         "/sources/{id}/content",
-                        web::get().to_async(|| HttpResponse::NotAcceptable()),
+                        web::get().to(|| HttpResponse::NotAcceptable()),
                     ),
             )
             .service(
@@ -78,12 +78,12 @@ pub fn start_server(settings: &config::Config) {
     })
     .bind(addr)
     .expect(&format!("Failed to bind to {}:{}", ip, port))
-    .start();
+    .run();
 
     println!("Started http server: {:?}", addr);
 }
 
-fn index(_req: HttpRequest) -> String {
+async fn index(_req: HttpRequest) -> String {
     WELCOME_MSG.to_string()
 }
 
@@ -97,17 +97,17 @@ mod tests {
     use actix_web::test;
     use actix_web::web;
 
-    #[test]
-    fn test_index_handler() {
+    #[actix_rt::test]
+    async fn test_index_handler() {
         let req = test::TestRequest::with_header("content-type", "text/plain").to_http_request();
-        let resp = super::index(req);
+        let resp = super::index(req).await;
         assert_eq!(resp, super::WELCOME_MSG);
     }
 
-    #[test]
-    fn test_health_handler() {
+    #[actix_rt::test]
+    async fn test_health_handler() {
         let state = super::ServerState::new(vec![], grok::Grok::default());
-        let resp = test::block_on(super::health(web::Data::new(state))).unwrap();
-        assert_eq!(resp.status(), http::StatusCode::OK);
+        let resp = super::health(web::Data::new(state)).await;
+        assert_eq!(resp.unwrap().status(), http::StatusCode::OK);
     }
 }
