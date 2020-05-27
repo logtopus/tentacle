@@ -10,6 +10,7 @@ use actix;
 mod cfg;
 mod constants;
 mod data;
+mod log_merge;
 mod logsource_port;
 mod logsource_svc;
 mod repository;

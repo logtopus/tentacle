@@ -5,7 +5,6 @@ extern crate futures;
 use actix_web::client::ClientRequest;
 use actix_web::http::StatusCode;
 use futures::future::Future;
-use futures::FutureExt;
 use futures::TryFutureExt;
 use std::panic;
 use std::thread;
