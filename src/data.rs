@@ -23,18 +23,14 @@ pub struct ParsedLine {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum StreamEntry {
-    LogLine {
-        line: String,
-        parsed_line: ParsedLine,
-    },
+pub struct StreamEntry {
+    pub line: String,
+    pub parsed_line: ParsedLine,
 }
 
 impl StreamEntry {
     pub fn timestamp(&self) -> u128 {
-        match self {
-            StreamEntry::LogLine { line, parsed_line } => parsed_line.timestamp,
-        }
+        self.parsed_line.timestamp
     }
 }
 
