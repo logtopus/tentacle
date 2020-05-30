@@ -72,35 +72,12 @@ impl LogMerge {
             loglevel: Some(format!("ERROR")),
             message: format!("A tentacle failed while retrieving the log."),
         };
-        let log_line = StreamEntry::LogLine {
+        let log_line = StreamEntry {
             line: String::from("Failed while retrieving the log."),
             parsed_line: error,
         };
         self.insert_into_buffer(log_line, source_idx);
     }
-
-    // async fn poll_source(&mut self, source_idx: usize) -> () {
-    //     match self.sources[source_idx].next().await {
-    //         Some(Ok(line)) => {
-    //             self.insert_into_buffer(line, source_idx);
-    //             self.source_state[source_idx] = SourceState::Delivered;
-    //         }
-    //         Ok(Ready(None)) => {
-    //             self.source_state[source_idx] = SourceState::Finished;
-    //             self.running_sources -= 1;
-    //         }
-    //         Ok(NotReady) => {
-    //             self.source_state[source_idx] = SourceState::NeedsPoll;
-    //         }
-    //         Err(e) => {
-    //             error!("Source failed: {}", e);
-    //             self.inject_error(e, source_idx);
-    //             self.source_state[source_idx] = SourceState::Failed;
-    //             self.running_sources -= 1;
-    //         }
-    //     }
-    //     ()
-    // }
 }
 
 impl Stream for LogMerge {
@@ -160,7 +137,7 @@ mod tests {
             message: line.to_string(),
             loglevel: None,
         };
-        StreamEntry::LogLine {
+        StreamEntry {
             line: String::from("Failed while retrieving the log."),
             parsed_line: error,
         }
@@ -194,7 +171,7 @@ mod tests {
         let sources = vec![s1];
         let merge = LogMerge::new(sources);
         let result = task::block_on(merge.collect::<Vec<StreamEntry>>());
-        assert_eq!(vec![l1.clone(), l2.clone()], result);
+        assert_eq!(vec![l1, l2], result);
     }
 
     #[test]
@@ -221,19 +198,6 @@ mod tests {
         let sources = vec![s1, s2, s3];
         let merge = LogMerge::new(sources);
         let result = task::block_on(merge.collect::<Vec<StreamEntry>>());
-        assert_eq!(
-            vec![
-                l21.clone(),
-                l11.clone(),
-                l31.clone(),
-                l32.clone(),
-                l12.clone(),
-                l33.clone(),
-                l22.clone(),
-                l13.clone(),
-                l34.clone()
-            ],
-            result
-        );
+        assert_eq!(vec![l21, l11, l31, l32, l12, l33, l22, l13, l34], result);
     }
 }

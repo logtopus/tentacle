@@ -1,6 +1,8 @@
 use crate::data;
 use crate::data::LogSource;
+use crate::data::LogStream;
 use crate::data::StreamEntry;
+use crate::log_merge::LogMerge;
 use actix_web::error::ResponseError;
 use actix_web::http::header;
 use actix_web::web;
@@ -119,47 +121,59 @@ fn get_source_content(
 ) -> HttpResponse {
     debug!("Content for source {} requested", id);
 
-    let stream_result = LogSourceService::create_content_stream(
-        id.to_string(),
-        state.get_ref().clone(),
-        &Arc::new(logfilter_from_query(&filter)),
-    );
+    let ids_string = id.to_string();
+    let ids: Vec<&str> = ids_string.split(",").collect();
+
+    let stream_result: Result<Vec<LogStream>, ApplicationError> = ids
+        .iter()
+        .map(|id| {
+            LogSourceService::create_content_stream(
+                String::from(*id),
+                state.get_ref().clone(),
+                &Arc::new(logfilter_from_query(&filter)),
+            )
+        })
+        .fold(Ok(Vec::<LogStream>::new()), |ret, res| match res {
+            Ok(stream) => {
+                if let Ok(mut vec) = ret {
+                    vec.push(stream);
+                    Ok(vec)
+                } else {
+                    ret
+                }
+            }
+            _err => ret,
+        });
 
     match stream_result {
         Ok(stream) => {
             let mut last_ts = 0;
+            let merged = LogMerge::new(stream);
 
-            let mapped_stream = stream.map(move |stream_entry| match stream_entry {
-                Ok(StreamEntry::LogLine {
-                    line,
-                    mut parsed_line,
-                }) => {
-                    if as_json {
-                        if parsed_line.timestamp == 0 {
-                            parsed_line.timestamp = last_ts;
-                        } else {
-                            last_ts = parsed_line.timestamp;
-                        }
-
-                        match serde_json::to_vec(&parsed_line) {
-                            Ok(mut vec) => {
-                                vec.put_u8('\n' as u8);
-                                Ok(Bytes::from(vec))
-                            }
-                            Err(e) => {
-                                error!("Failed to convert stream entry to json: {}", e);
-                                Err(ApplicationError::FailedToReadSource) // TODO json error //Bytes::new()
-                            }
-                        }
+            let mapped_stream = merged.map(move |stream_entry| {
+                let mut parsed_line = stream_entry.parsed_line;
+                let line = stream_entry.line;
+                if as_json {
+                    if parsed_line.timestamp == 0 {
+                        parsed_line.timestamp = last_ts;
                     } else {
-                        let mut vec = line.into_bytes();
-                        vec.put_u8('\n' as u8);
-                        Ok(Bytes::from(vec))
+                        last_ts = parsed_line.timestamp;
                     }
-                }
-                Err(e) => {
-                    error!("Stream failed: {}", e);
-                    Err(e) //Bytes::new()
+
+                    match serde_json::to_vec(&parsed_line) {
+                        Ok(mut vec) => {
+                            vec.put_u8('\n' as u8);
+                            Ok(Bytes::from(vec))
+                        }
+                        Err(e) => {
+                            error!("Failed to convert stream entry to json: {}", e);
+                            Err(ApplicationError::FailedToReadSource) // TODO json error //Bytes::new()
+                        }
+                    }
+                } else {
+                    let mut vec = line.into_bytes();
+                    vec.put_u8('\n' as u8);
+                    Ok(Bytes::from(vec))
                 }
             });
 
