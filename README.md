@@ -1,4 +1,4 @@
-[![CircleCI](https://circleci.com/gh/logtopus/tentacle/tree/master.svg?style=svg)](https://circleci.com/gh/logtopus/tentacle/tree/master)
+![](https://github.com/logtopus/tentacle/workflows/Build%20and%20Test/badge.svg)
 
 # tentacle
 The daemon which provides data to the logtopus server
