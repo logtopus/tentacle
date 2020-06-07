@@ -11,6 +11,7 @@ license = "Apache-2.0"
 actix = "0.9" # actor framework
 actix-web = "2" # web serving
 actix-rt = "1.0.0"
+async-std = "1.6"
 bytes = "0.5"
 clap = "2.33" # parse command line options
 config = "0.10" # parse config file

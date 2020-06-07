@@ -15,19 +15,23 @@ pub enum ApplicationError {
     FailedToReadSource,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone)]
 pub struct ParsedLine {
     pub timestamp: u128,
     pub loglevel: Option<String>,
     pub message: String,
 }
 
-#[derive(Debug)]
-pub enum StreamEntry {
-    LogLine {
-        line: String,
-        parsed_line: ParsedLine,
-    },
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct StreamEntry {
+    pub line: String,
+    pub parsed_line: ParsedLine,
+}
+
+impl StreamEntry {
+    pub fn timestamp(&self) -> u128 {
+        self.parsed_line.timestamp
+    }
 }
 
 pub type LogStream = LocalBoxStream<'static, Result<StreamEntry, ApplicationError>>;

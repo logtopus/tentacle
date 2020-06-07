@@ -119,7 +119,7 @@ impl FileLogStream {
                     if !self.context.matches(&parsed_line) {
                         continue;
                     } else {
-                        return Poll::Ready(Some(Ok(StreamEntry::LogLine { line, parsed_line })));
+                        return Poll::Ready(Some(Ok(StreamEntry { line, parsed_line })));
                     }
                 }
                 Err(e) => {
