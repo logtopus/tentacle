@@ -2,7 +2,7 @@ use crate::data::ApplicationError;
 use crate::data::LogQueryContext;
 use crate::data::LogSource;
 use crate::data::LogStream;
-use crate::repository::FileRepository;
+use crate::log_source::FileSource;
 use crate::state;
 use std::sync::Arc;
 
@@ -23,11 +23,7 @@ impl LogSourceService {
                     id: _,
                     file_pattern,
                     line_pattern,
-                } => FileRepository::create_stream(
-                    &file_pattern,
-                    &Arc::new(line_pattern),
-                    &logfilter,
-                ),
+                } => FileSource::create_stream(&file_pattern, &Arc::new(line_pattern), &logfilter),
                 LogSource::Journal { .. } => unimplemented!(),
             },
             None => Err(ApplicationError::SourceNotFound),

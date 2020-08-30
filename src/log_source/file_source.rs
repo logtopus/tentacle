@@ -173,9 +173,9 @@ impl Stream for FileLogStream {
     }
 }
 
-pub struct FileRepository;
+pub struct FileSource;
 
-impl FileRepository {
+impl FileSource {
     pub fn create_stream(
         file_pattern: &Regex,
         line_pattern: &Arc<LinePattern>,
@@ -285,13 +285,13 @@ impl FileRepository {
 
 #[cfg(test)]
 mod tests {
-    use crate::repository::filerepo::FileRepository;
+    use crate::log_source::file_source::FileSource;
     use regex::Regex;
 
     #[test]
     fn test_resolve_files() {
         let regex = Regex::new(r#"tests/demo\.log(\.(?P<rotation>\d)(\.gz)?)?"#).unwrap();
-        let result = FileRepository::resolve_files(&regex, 0).unwrap();
+        let result = FileSource::resolve_files(&regex, 0).unwrap();
         assert_eq!(result.len(), 3);
         assert_eq!(result.get(0), Some(&"tests/demo.log.2.gz".to_string()));
         assert_eq!(result.get(1), Some(&"tests/demo.log.1".to_string()));
