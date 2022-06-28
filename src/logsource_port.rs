@@ -1,7 +1,6 @@
 use crate::data;
 use crate::data::LogSource;
 use crate::data::LogStream;
-use crate::data::StreamEntry;
 use crate::log_merge::LogMerge;
 use actix_web::error::ResponseError;
 use actix_web::http::header;

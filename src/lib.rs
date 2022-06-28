@@ -5,7 +5,6 @@ extern crate serde_derive;
 
 use crate::constants::AUTHORS;
 use crate::constants::VERSION;
-use actix;
 
 mod cfg;
 mod constants;
